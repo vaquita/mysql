@@ -105,7 +105,8 @@ func (c *Conn) parseEOFPacket(b *bytes.Buffer) {
 
 //<!-- connection phase packets -->
 
-// parseHandshakePacket
+// parseHandshakePacket parses handshake initialization packet received from
+// the server.
 func (c *Conn) parseHandshakePacket(b *bytes.Buffer) {
 	var authPluginDataBuf bytes.Buffer
 
@@ -148,7 +149,7 @@ func (c *Conn) parseHandshakePacket(b *bytes.Buffer) {
 	}
 }
 
-// createHandshakeResponsePacket
+// createHandshakeResponsePacket generates the handshake response packet.
 func (c *Conn) createHandshakeResponsePacket() *bytes.Buffer {
 	payloadLength := c.handshakeResponsePacketLength()
 
@@ -188,3 +189,234 @@ func (c *Conn) handshakeResponsePacketLength() int {
 }
 
 //<!-- command phase packets -->
+
+// createComQuit generates the COM_QUIT packet.
+func (c *Conn) createComQuit() (*bytes.Buffer, error) {
+	var err error
+
+	payloadLength := 1 // comQuit
+
+	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b.Next(4)
+
+	if err = b.WriteByte(comQuit); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+// createComInitDb generates the COM_INIT_DB packet.
+func (c *Conn) createComInitDb(schema string) (*bytes.Buffer, error) {
+	var err error
+
+	payloadLength := 1 + // comInitDb
+		len(schema) // length of schema name
+
+	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b.Next(4)
+
+	if err = b.WriteByte(comInitDb); err != nil {
+		return nil, err
+	}
+
+	if _, err = b.WriteString(schema); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+// createComQuery generates the COM_QUERY packet.
+func (c *Conn) createComQuery(query string) (*bytes.Buffer, error) {
+	var err error
+
+	payloadLength := 1 + // comQuery
+		len(query) // length of query
+
+	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b.Next(4)
+
+	if err = b.WriteByte(comQuery); err != nil {
+		return nil, err
+	}
+
+	if _, err = b.WriteString(query); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+// createComFieldList generates the COM_FILED_LIST packet.
+func (c *Conn) createComFieldList(table, fieldWildcard string) (*bytes.Buffer, error) {
+	var err error
+
+	payloadLength := 1 + // comFieldList
+		len(table) + // length of table name
+		1 + // NULL
+		len(fieldWildcard) // length of field wildcard
+
+	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b.Next(4)
+
+	if err = b.WriteByte(comFieldList); err != nil {
+		return nil, err
+	}
+
+	if _, err = b.WriteString(table); err != nil {
+		return nil, err
+	}
+
+	if err = b.WriteByte(0); err != nil {
+		return nil, err
+	}
+
+	if _, err = b.WriteString(fieldWildcard); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+// createComCreateDb generates the COM_CREATE_DB packet.
+func (c *Conn) createComCreateDb(schema string) (*bytes.Buffer, error) {
+	var err error
+
+	payloadLength := 1 + // comCreateDb
+		len(schema) // length of schema name
+
+	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b.Next(4)
+
+	if err = b.WriteByte(comCreateDb); err != nil {
+		return nil, err
+	}
+
+	if _, err = b.WriteString(schema); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+// createComDropDb generate the COM_DROP_DB packet.
+func (c *Conn) createComDropDb(schema string) (*bytes.Buffer, error) {
+	var err error
+
+	payloadLength := 1 + // comDropDb
+		len(schema) // length of schema name
+
+	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b.Next(4)
+
+	if err = b.WriteByte(comDropDb); err != nil {
+		return nil, err
+	}
+
+	if _, err = b.WriteString(schema); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+type MyRefreshOption uint8
+
+const (
+	RefreshGrant   MyRefreshOption = 0x01
+	RefreshLog     MyRefreshOption = 0x02
+	RefreshTables  MyRefreshOption = 0x04
+	RefreshHosts   MyRefreshOption = 0x08
+	RefreshStatus  MyRefreshOption = 0x10
+	RefreshSlave   MyRefreshOption = 0x20
+	RefreshThreads MyRefreshOption = 0x40
+	RefreshMaster  MyRefreshOption = 0x80
+)
+
+// createComRefresh generates COM_REFRESH packet.
+func (c *Conn) createComRefresh(subCommand uint8) (*bytes.Buffer, error) {
+	var err error
+
+	payloadLength := 1 + // comRefresh
+		1 // subCommand length
+
+	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b.Next(4)
+
+	if err = b.WriteByte(comRefresh); err != nil {
+		return nil, err
+	}
+
+	if err = b.WriteByte(subCommand); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+type MyShutdownLevel uint8
+
+const (
+	ShutdownDefault             MyShutdownLevel = 0x00
+	ShutdownWaitConnections     MyShutdownLevel = 0x01
+	ShutdownWaitTransactions    MyShutdownLevel = 0x02
+	ShutdownWaitUpdates         MyShutdownLevel = 0x08
+	ShutdownWaitAllBuffers      MyShutdownLevel = 0x10
+	ShutdownWaitCriticalBuffers MyShutdownLevel = 0x11
+	KillQuery                   MyShutdownLevel = 0xfe
+	KillConnections             MyShutdownLevel = 0xff
+)
+
+// createComShutdown generate COM_SHUTDOWN packet.
+func (c *Conn) createComShutdown(level MyShutdownLevel) (*bytes.Buffer, error) {
+	var err error
+
+	payloadLength := 1 + // comShutdown
+		1 // shutdown level length
+
+	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b.Next(4)
+
+	if err = b.WriteByte(comShutdown); err != nil {
+		return nil, err
+	}
+
+	if err = b.WriteByte(byte(level)); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+// createComStatistics generates COM_STATISTICS packet.
+func (c *Conn) createComStatistics() (*bytes.Buffer, error) {
+	var err error
+
+	payloadLength := 1 // comStatistics
+
+	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b.Next(4)
+
+	if err = b.WriteByte(comStatistics); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+// createComProcessInfo generates COM_PROCESS_INFO packet.
+func (c *Conn) createComProcessInfo() (*bytes.Buffer, error) {
+	var err error
+
+	payloadLength := 1 // comProcessInfo
+
+	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b.Next(4)
+
+	if err = b.WriteByte(comProcessInfo); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
