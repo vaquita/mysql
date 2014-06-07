@@ -165,20 +165,24 @@ func (c *Conn) createHandshakeResponsePacket() *bytes.Buffer {
 
 	putNullTerminatedString(b, c.user)
 
-	if (c.clientCapabilityFlags & clientPluginAuthLenencClientData) != 0 {
+	if (c.serverCapabilityFlags & clientPluginAuthLenencClientData) != 0 {
 		putLenencString(b, c.authResponseData)
-	} else if (c.clientCapabilityFlags & clientSecureConnection) != 0 {
+	} else if (c.serverCapabilityFlags & clientSecureConnection) != 0 {
 		b.WriteByte(byte(len(c.authResponseData)))
 		b.WriteString(c.authResponseData)
 	} else {
 		putNullTerminatedString(b, c.authResponseData)
 	}
 
-	if (c.clientCapabilityFlags & clientConnectWithDb) != 0 {
+	if (c.serverCapabilityFlags & clientConnectWithDb) != 0 {
 		putNullTerminatedString(b, c.schema)
 	}
 
-	if (c.clientCapabilityFlags & clientConnectAttrs) != 0 {
+	if (c.serverCapabilityFlags & clientPluginAuth) != 0 {
+		putNullTerminatedString(b, c.authPluginName)
+	}
+
+	if (c.serverCapabilityFlags & clientConnectAttrs) != 0 {
 		// TODO: handle connection attributes
 	}
 	return b
