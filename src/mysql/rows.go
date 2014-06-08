@@ -7,28 +7,27 @@ import (
 type Rows struct {
 	columnCount uint64
 	columnDefs  []*columnDefinition
-	rows []*row
+	rows        []*row
 }
 
 type columnDefinition struct {
-	catalog             string
-	schema              string
-	table               string
-	orgTable            string
-	name                string
-	orgName             string
+	catalog             NullString
+	schema              NullString
+	table               NullString
+	orgTable            NullString
+	name                NullString
+	orgName             NullString
 	fixedLenFieldLength uint64
 	characterSet        uint16
 	columnLength        uint32
 	columnType          uint8
 	flags               uint16
 	decimals            uint8
-	defaultValuesLength uint64
 	defaultValues       string
 }
 
 type row struct {
-  cols []interface{}
+	columns []interface{}
 }
 
 func (r *Rows) Columns() []string {

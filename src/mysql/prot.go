@@ -5,10 +5,12 @@ import (
 	"encoding/binary"
 )
 
+// protocol packet header size
 const (
 	packetHeaderSize = 4
 )
 
+// server commands
 const (
 	comSleep = iota
 	comQuit
@@ -43,6 +45,7 @@ const (
 	comEnd // must always be last
 )
 
+// client/server capability flags
 const (
 	clientLongPassword = 1 << iota
 	clientFoundRows
@@ -68,10 +71,33 @@ const (
 	clientPluginAuthLenencClientData
 	clientCanHandleExpiredPasswords
 	clientSessionTrack
-	// ...
-	clientProgress            = 1 << 29
-	clientSSLVerifyServerCert = 1 << 30
-	clientRememberOptions     = 1 << 31
+	_ // unassigned, 1 << 24
+	_
+	_
+	_
+	_
+	clientProgress // 1 << 29
+	clientSSLVerifyServerCert
+	clientRememberOptions
+)
+
+// server status flags
+const (
+	serverStatusInTrans = 1 << iota
+	serverStatusAutocommit
+	_ // unassigned, 4
+	serverMoreResultsExists
+	serverStatusNoGoodIndexUsed
+	serverStatusNoIndexUsed
+	serverStatusCursorExists
+	serverStatusLastRowSent
+	serverStatusDbDropped
+	serverStatusNoBackshashEscapes
+	serverStatusMetadataChanged
+	serverQueryWasSlow
+	serverPSOutParams
+	serverStatusInTransReadonly
+	serverSessionStateChanged
 )
 
 //<!-- generic response packets -->
@@ -423,4 +449,67 @@ func (c *Conn) createComProcessInfo() (*bytes.Buffer, error) {
 	}
 
 	return b, nil
+}
+
+func (c *Conn) parseColumnDefinitionPacket(b *bytes.Buffer, isComFieldList bool) *columnDefinition {
+	// alloc a new columnDefinition object
+	col := new(columnDefinition)
+
+	col.catalog = getLenencString(b)
+	col.schema = getLenencString(b)
+	col.table = getLenencString(b)
+	col.orgTable = getLenencString(b)
+	col.name = getLenencString(b)
+	col.orgName = getLenencString(b)
+	col.fixedLenFieldLength = getLenencInteger(b)
+	col.characterSet = binary.LittleEndian.Uint16(b.Next(2))
+	col.columnLength = binary.LittleEndian.Uint32(b.Next(4))
+	col.columnType = uint8(b.Next(1)[0])
+	col.flags = binary.LittleEndian.Uint16(b.Next(2))
+	col.decimals = uint8(b.Next(1)[0])
+
+	b.Next(2) //filler [00] [00]
+
+	if isComFieldList == true {
+		len := getLenencInteger(b)
+		col.defaultValues = string(b.Next(int(len)))
+	}
+
+	return col
+}
+
+func (c *Conn) parseResultSetRowPacket(b *bytes.Buffer, columnCount uint64) *row {
+	var val NullString
+
+	r := new(row)
+	r.columns = make([]interface{}, columnCount)
+
+	for i := uint64(0); i < columnCount; i++ {
+		val = getLenencString(b)
+		if val.valid == true {
+			r.columns = append(r.columns, val.value)
+		} else {
+			r.columns = append(r.columns, nil)
+		}
+	}
+
+	return r
+}
+
+func (c *Conn) parseBinaryResultSetRowPacket(b *bytes.Buffer, columnCount uint64) *row {
+	r := new(row)
+	r.columns = make([]interface{}, columnCount)
+
+	b.Next(1) // packet header [00]
+
+	// nullBitmap := b.Next(int((columnCount + 9) / 8))
+
+	for i := uint64(0); i < columnCount; i++ {
+		// TODO: parse typed column data.
+	}
+
+	return nil
+}
+
+func (c *Conn) handleComQueryResponse(b *bytes.Buffer) {
 }

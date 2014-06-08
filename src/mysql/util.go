@@ -23,7 +23,7 @@ func getLenencInteger(b *bytes.Buffer) uint64 {
 
 	switch {
 	// 1-byte
-	case first < 0xfb:
+	case first <= 0xfb:
 		return uint64(first)
 	// 2-byte
 	case first == 0xfc:
@@ -34,8 +34,8 @@ func getLenencInteger(b *bytes.Buffer) uint64 {
 	// 8-byte
 	case first == 0xfe:
 		return binary.LittleEndian.Uint64(b.Next(8))
-		// TODO: handle error
-		// default:
+	// TODO: handle error
+	default:
 	}
 	return 0
 }
@@ -44,10 +44,19 @@ func putLenencInteger(b *bytes.Buffer, v uint64) {
 }
 
 // length-encoded string
-func getLenencString(b *bytes.Buffer) string {
+func getLenencString(b *bytes.Buffer) NullString {
+	var str NullString
+
 	length := int(getLenencInteger(b))
-	// TODO: handle NULLs
-	return string(b.Next(length))
+
+	if length == 0xfb { // NULL
+		str.valid = false
+	} else {
+		str.value = string(b.Next(length))
+		str.valid = true
+	}
+
+	return str
 }
 
 func putLenencString(b *bytes.Buffer, v string) {
