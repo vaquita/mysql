@@ -41,6 +41,20 @@ func getLenencInteger(b *bytes.Buffer) uint64 {
 }
 
 func putLenencInteger(b *bytes.Buffer, v uint64) {
+	switch {
+	case v < 251:
+		b.WriteByte(byte(v))
+	case v >= 251 && v < 2^16:
+		b.WriteByte(0xfc)
+		binary.LittleEndian.PutUint16(b.Next(2), uint16(v))
+	case v >= 2^16 && v < 2^24:
+		b.WriteByte(0xfd)
+		putUint32_3(b.Next(3), uint32(v))
+	case v >= 2^24 && v < 2^64:
+		b.WriteByte(0xfe)
+		binary.LittleEndian.PutUint64(b.Next(8), v)
+	}
+	return
 }
 
 // length-encoded string
@@ -60,6 +74,8 @@ func getLenencString(b *bytes.Buffer) NullString {
 }
 
 func putLenencString(b *bytes.Buffer, v string) {
+	putLenencInteger(b, uint64(len(v)))
+	b.WriteString(v)
 }
 
 func putNullTerminatedString(b *bytes.Buffer, v string) {

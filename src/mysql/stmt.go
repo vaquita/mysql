@@ -5,6 +5,25 @@ import (
 )
 
 type Stmt struct {
+	// COM_STMT_PREPARE
+	query string
+
+	// COM_STMT_PREPARE response
+	id           uint32
+	columnCount  uint16
+	paramCount   uint16
+	warningCount uint16
+	columnDefs   []*columnDefinition
+	paramDefs    []*columnDefinition
+
+	// COM_STMT_EXECUTE
+	flags              uint8
+	iterationCount     uint32
+	nullBitmap         []byte
+	newParamsBoundFlag uint8
+	paramType          []uint16
+	paramValue         []interface{}
+	paramValueLength   int // simple optimization, length of values all the parameters
 }
 
 func (s *Stmt) Close() error {
