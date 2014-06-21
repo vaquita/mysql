@@ -15,9 +15,7 @@ type Conn struct {
 	warnings     uint16
 
 	// ERR packet
-	errorCode    uint16
-	sqlState     string
-	errorMessage string
+	e Error
 
 	// handshake initialization packet
 	serverVersion         string

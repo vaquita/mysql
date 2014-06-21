@@ -117,11 +117,15 @@ func (c *Conn) parseOKPacket(b *bytes.Buffer) {
 
 // parseERRPacket parses the ERR packet received from the server.
 func (c *Conn) parseERRPacket(b *bytes.Buffer) {
+	var e Error
+
 	b.Next(1) // [ff] the ERR header
-	c.errorCode = binary.LittleEndian.Uint16(b.Next(2))
+
+	e.code = binary.LittleEndian.Uint16(b.Next(2))
 	b.Next(1) // '#' the sql-state marker
-	c.sqlState = string(b.Next(5))
-	c.errorMessage = string(b.Next(b.Len()))
+	e.sqlState = string(b.Next(5))
+	e.message = string(b.Next(b.Len()))
+	e.when = time.Now()
 }
 
 // parseEOFPacket parses the EOF packet received from the server.
