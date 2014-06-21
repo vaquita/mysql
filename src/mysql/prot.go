@@ -191,7 +191,7 @@ func (c *Conn) createHandshakeResponsePacket() *bytes.Buffer {
 	b.WriteByte(c.clientCharacterSet) // client character set
 	b.Next(23)                        // reserved (all [0])
 
-	putNullTerminatedString(b, c.user)
+	putNullTerminatedString(b, c.p.username)
 
 	if (c.serverCapabilityFlags & clientPluginAuthLenencClientData) != 0 {
 		putLenencString(b, c.authResponseData)
@@ -203,7 +203,7 @@ func (c *Conn) createHandshakeResponsePacket() *bytes.Buffer {
 	}
 
 	if (c.serverCapabilityFlags & clientConnectWithDb) != 0 {
-		putNullTerminatedString(b, c.schema)
+		putNullTerminatedString(b, c.p.schema)
 	}
 
 	if (c.serverCapabilityFlags & clientPluginAuth) != 0 {

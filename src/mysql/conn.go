@@ -5,12 +5,8 @@ import (
 )
 
 type Conn struct {
-	user     string
-	password string
-	host     string
-	socket   string
-	port     uint16
-	schema   string
+	// connection properties
+	p properties
 
 	// OK packet
 	affectedRows uint64
