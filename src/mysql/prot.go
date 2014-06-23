@@ -3,6 +3,7 @@ package mysql
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"math"
 	"time"
 )
@@ -41,7 +42,7 @@ const (
 	comStmtSendLongData
 	comStmtClose
 	comStmtReset
-	comSetOptioN
+	comSetOption
 	comStmtFetch
 	comDaemon
 	comEnd // must always be last
@@ -102,36 +103,94 @@ const (
 	serverSessionStateChanged
 )
 
+//<!-- protocol packet reader/writer -->
+
+// readPacket reads the next protocol packet from the network, verifies the
+// packet sequence ID and returns the payload.
+func (c *Conn) readPacket() ([]byte, error) {
+	var err error
+
+	// first read the packet header
+	hBuf := make([]byte, packetHeaderSize)
+	if _, err = c.n.read(hBuf); err != nil {
+		return nil, err
+	}
+
+	// payload length
+	payloadLength := getUint32_3(hBuf[0:3])
+
+	// read and verify packet sequence ID
+	if c.sequenceId != uint8(hBuf[3]) {
+		return nil, errors.New("mysql: packets out of order")
+	}
+	// increment the packet sequence ID
+	c.sequenceId++
+
+	// finally, read the payload
+	pBuf := make([]byte, payloadLength)
+	if _, err = c.n.read(pBuf); err != nil {
+		return nil, err
+	}
+
+	return pBuf, nil
+}
+
+// writePacket accepts the protocol packet to be written, populates the header
+// and writes it to the network.
+func (c *Conn) writePacket(b []byte) error {
+	var err error
+
+	// populate the packet header
+	putUint32_3(b[0:3], uint32(len(b))) // payload length
+	b[3] = c.sequenceId                 // packet sequence ID
+
+	// write it to the network
+	if _, err = c.n.write(b); err != nil {
+		return err
+	}
+
+	// finally, increment the packet sequence ID
+	c.sequenceId++
+
+	return nil
+}
+
 //<!-- generic response packets -->
 
-// parseOKPacket parses the OK packet received from the server.
-func (c *Conn) parseOKPacket(b *bytes.Buffer) {
-	b.Next(1) // [00] the OK header
+const (
+	okPacket                 = 0x00
+	errPacket                = 0xff
+	eofPacket                = 0xfe
+	localInfileRequestPacket = 0xfb
+)
+
+// parseOkPacket parses the OK packet received from the server.
+func (c *Conn) parseOkPacket(b *bytes.Buffer) {
+	b.Next(1) // [00] the OK header (= okPacket)
 	c.affectedRows = getLenencInteger(b)
 	c.lastInsertId = getLenencInteger(b)
 
 	c.statusFlags = binary.LittleEndian.Uint16(b.Next(2))
 	c.warnings = binary.LittleEndian.Uint16(b.Next(2))
-	// TODO : read rest of fields
+	// TODO : read rest of the fields
 }
 
-// parseERRPacket parses the ERR packet received from the server.
-func (c *Conn) parseERRPacket(b *bytes.Buffer) {
-	var e Error
+// parseErrPacket parses the ERR packet received from the server.
+func (c *Conn) parseErrPacket(b *bytes.Buffer) {
+	b.Next(1) // [ff] the ERR header (= errPacket)
 
-	b.Next(1) // [ff] the ERR header
-
-	e.code = binary.LittleEndian.Uint16(b.Next(2))
+	c.e.code = binary.LittleEndian.Uint16(b.Next(2))
 	b.Next(1) // '#' the sql-state marker
-	e.sqlState = string(b.Next(5))
-	e.message = string(b.Next(b.Len()))
-	e.when = time.Now()
+	c.e.sqlState = string(b.Next(5))
+	c.e.message = string(b.Next(b.Len()))
+	c.e.when = time.Now()
 }
 
 // parseEOFPacket parses the EOF packet received from the server.
 func (c *Conn) parseEOFPacket(b *bytes.Buffer) {
-	b.Next(1) // [fe] the EOF header
-	c.warnings = binary.LittleEndian.Uint16(b.Next(2))
+	b.Next(1) // [fe] the EOF header (= eofPacket)
+	// TODO: reset warning count
+	c.warnings += binary.LittleEndian.Uint16(b.Next(2))
 	c.statusFlags = binary.LittleEndian.Uint16(b.Next(2))
 }
 
@@ -182,7 +241,7 @@ func (c *Conn) parseHandshakePacket(b *bytes.Buffer) {
 }
 
 // createHandshakeResponsePacket generates the handshake response packet.
-func (c *Conn) createHandshakeResponsePacket() *bytes.Buffer {
+func createHandshakeResponsePacket(c *Conn) *bytes.Buffer {
 	payloadLength := c.handshakeResponsePacketLength()
 
 	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
@@ -227,7 +286,7 @@ func (c *Conn) handshakeResponsePacketLength() int {
 //<!-- command phase packets -->
 
 // createComQuit generates the COM_QUIT packet.
-func (c *Conn) createComQuit() (*bytes.Buffer, error) {
+func createComQuit() (*bytes.Buffer, error) {
 	payloadLength := 1 // comQuit
 
 	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
@@ -239,7 +298,7 @@ func (c *Conn) createComQuit() (*bytes.Buffer, error) {
 }
 
 // createComInitDb generates the COM_INIT_DB packet.
-func (c *Conn) createComInitDb(schema string) (*bytes.Buffer, error) {
+func createComInitDb(schema string) (*bytes.Buffer, error) {
 	var err error
 
 	payloadLength := 1 + // comInitDb
@@ -257,7 +316,7 @@ func (c *Conn) createComInitDb(schema string) (*bytes.Buffer, error) {
 }
 
 // createComQuery generates the COM_QUERY packet.
-func (c *Conn) createComQuery(query string) (*bytes.Buffer, error) {
+func createComQuery(query string) (*bytes.Buffer, error) {
 	var err error
 
 	payloadLength := 1 + // comQuery
@@ -275,7 +334,7 @@ func (c *Conn) createComQuery(query string) (*bytes.Buffer, error) {
 }
 
 // createComFieldList generates the COM_FILED_LIST packet.
-func (c *Conn) createComFieldList(table, fieldWildcard string) (*bytes.Buffer, error) {
+func createComFieldList(table, fieldWildcard string) (*bytes.Buffer, error) {
 	var err error
 
 	payloadLength := 1 + // comFieldList
@@ -299,7 +358,7 @@ func (c *Conn) createComFieldList(table, fieldWildcard string) (*bytes.Buffer, e
 }
 
 // createComCreateDb generates the COM_CREATE_DB packet.
-func (c *Conn) createComCreateDb(schema string) (*bytes.Buffer, error) {
+func createComCreateDb(schema string) (*bytes.Buffer, error) {
 	var err error
 
 	payloadLength := 1 + // comCreateDb
@@ -316,8 +375,8 @@ func (c *Conn) createComCreateDb(schema string) (*bytes.Buffer, error) {
 	return b, nil
 }
 
-// createComDropDb generate the COM_DROP_DB packet.
-func (c *Conn) createComDropDb(schema string) (*bytes.Buffer, error) {
+// createComDropDb generates the COM_DROP_DB packet.
+func createComDropDb(schema string) (*bytes.Buffer, error) {
 	var err error
 
 	payloadLength := 1 + // comDropDb
@@ -348,7 +407,7 @@ const (
 )
 
 // createComRefresh generates COM_REFRESH packet.
-func (c *Conn) createComRefresh(subCommand uint8) (*bytes.Buffer, error) {
+func createComRefresh(subCommand uint8) (*bytes.Buffer, error) {
 	payloadLength := 1 + // comRefresh
 		1 // subCommand length
 
@@ -374,8 +433,8 @@ const (
 	KillConnections             MyShutdownLevel = 0xff
 )
 
-// createComShutdown generate COM_SHUTDOWN packet.
-func (c *Conn) createComShutdown(level MyShutdownLevel) (*bytes.Buffer, error) {
+// createComShutdown generates COM_SHUTDOWN packet.
+func createComShutdown(level MyShutdownLevel) (*bytes.Buffer, error) {
 	payloadLength := 1 + // comShutdown
 		1 // shutdown level length
 
@@ -389,7 +448,7 @@ func (c *Conn) createComShutdown(level MyShutdownLevel) (*bytes.Buffer, error) {
 }
 
 // createComStatistics generates COM_STATISTICS packet.
-func (c *Conn) createComStatistics() (*bytes.Buffer, error) {
+func createComStatistics() (*bytes.Buffer, error) {
 	payloadLength := 1 // comStatistics
 
 	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
@@ -401,7 +460,7 @@ func (c *Conn) createComStatistics() (*bytes.Buffer, error) {
 }
 
 // createComProcessInfo generates COM_PROCESS_INFO packet.
-func (c *Conn) createComProcessInfo() (*bytes.Buffer, error) {
+func createComProcessInfo() (*bytes.Buffer, error) {
 	payloadLength := 1 // comProcessInfo
 
 	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
@@ -412,7 +471,8 @@ func (c *Conn) createComProcessInfo() (*bytes.Buffer, error) {
 	return b, nil
 }
 
-func (c *Conn) parseColumnDefinitionPacket(b *bytes.Buffer, isComFieldList bool) *columnDefinition {
+// parseColumnDefinitionPacket parses the column (field) definition packet.
+func parseColumnDefinitionPacket(b *bytes.Buffer, isComFieldList bool) *columnDefinition {
 	// alloc a new columnDefinition object
 	col := new(columnDefinition)
 
@@ -439,7 +499,7 @@ func (c *Conn) parseColumnDefinitionPacket(b *bytes.Buffer, isComFieldList bool)
 	return col
 }
 
-func (c *Conn) parseResultSetRowPacket(b *bytes.Buffer, columnCount uint64) *row {
+func parseResultSetRowPacket(b *bytes.Buffer, columnCount uint64) *row {
 	var val NullString
 
 	r := new(row)
@@ -457,13 +517,103 @@ func (c *Conn) parseResultSetRowPacket(b *bytes.Buffer, columnCount uint64) *row
 	return r
 }
 
-func (c *Conn) handleComQueryResponse(b *bytes.Buffer) {
+func (c *Conn) handleResultSetRow(b []byte, columnCount uint64) *row {
+	r := new(row)
+	r.columns = make([]interface{}, 0)
+
+	for i := uint64(0); i < columnCount; i++ {
+		r.columns = append(r.columns, getLenencString(bytes.NewBuffer(b)))
+	}
+	return r
+}
+
+func (c *Conn) handleResultSet() (*Rows, error) {
+	var (
+		err  error
+		b    []byte
+		done bool
+	)
+
+	rs := new(Rows)
+	rs.columnDefs = make([]*columnDefinition, 0)
+	rs.rows = make([]*row, 0)
+
+	// read the packet containing the column count (stored in length-encoded
+	// integer)
+	if b, err = c.readPacket(); err != nil {
+		return nil, err
+	}
+	rs.columnCount = getLenencInteger(bytes.NewBuffer(b))
+
+	// read column definition packets
+	// TODO: columnCount: uint64 or uint16 ??
+	for i := uint64(0); i < rs.columnCount; i++ {
+		if b, err = c.readPacket(); err != nil {
+			return nil, err
+		} else {
+			rs.columnDefs = append(rs.columnDefs,
+				parseColumnDefinitionPacket(bytes.NewBuffer(b), false))
+		}
+	}
+
+	// read EOF packet
+	if b, err = c.readPacket(); err != nil {
+		return nil, err
+	} else {
+		c.parseEOFPacket(bytes.NewBuffer(b))
+	}
+
+	// read resultset row packets (each containing rs.columnCount values),
+	// until EOF packet.
+	for !done {
+		if b, err = c.readPacket(); err != nil {
+			return nil, err
+		}
+
+		switch b[0] {
+		case eofPacket:
+			done = true
+		case errPacket:
+			c.parseErrPacket(bytes.NewBuffer(b))
+			return nil, &c.e
+		default: // result set row
+			rs.rows = append(rs.rows, c.handleResultSetRow(b, rs.columnCount))
+		}
+	}
+	return rs, nil
+}
+
+func (c *Conn) handleComQueryResponse() (*Rows, error) {
+	var (
+		err error
+		b   []byte
+	)
+
+	if b, err = c.readPacket(); err != nil {
+		return nil, err
+	}
+
+	switch b[0] {
+	case errPacket:
+		c.parseErrPacket(bytes.NewBuffer(b))
+		return nil, &c.e
+	case okPacket:
+		c.parseOkPacket(bytes.NewBuffer(b))
+		return nil, nil
+	case localInfileRequestPacket: // local infile request
+		// TODO: add support for local infile request
+	default: // result set
+		return c.handleResultSet()
+	}
+
+	// control shouldn't reach here
+	return nil, nil
 }
 
 //<!-- prepared statements -->
 
 // createComStmtPrepare generates the COM_STMT_PREPARE packet.
-func (c *Conn) createComStmtPrepare(query string) (*bytes.Buffer, error) {
+func createComStmtPrepare(query string) (*bytes.Buffer, error) {
 	var err error
 
 	payloadLength := 1 + // comStmtPrepare
@@ -481,7 +631,7 @@ func (c *Conn) createComStmtPrepare(query string) (*bytes.Buffer, error) {
 }
 
 // createComStmtExecute generates the COM_STMT_EXECUTE packet.
-func (c *Conn) createComStmtExecute(s *Stmt) (*bytes.Buffer, error) {
+func createComStmtExecute(s *Stmt) (*bytes.Buffer, error) {
 	// calculate the payload length
 	payloadLength := 1 + //comStmtPrepare
 		9 // id(4) + flags(1) + iterationCount(4)
@@ -522,7 +672,7 @@ func (c *Conn) createComStmtExecute(s *Stmt) (*bytes.Buffer, error) {
 }
 
 // createComStmtClose generates the COM_STMT_CLOSE packet.
-func (c *Conn) createComStmtClose(s *Stmt) (*bytes.Buffer, error) {
+func createComStmtClose(s *Stmt) (*bytes.Buffer, error) {
 	payloadLength := 5 // comStmtClose(1) + s.id(4)
 
 	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
@@ -535,7 +685,7 @@ func (c *Conn) createComStmtClose(s *Stmt) (*bytes.Buffer, error) {
 }
 
 // createComStmtReset generates the COM_STMT_RESET packet.
-func (c *Conn) createComStmtReset(s *Stmt) (*bytes.Buffer, error) {
+func createComStmtReset(s *Stmt) (*bytes.Buffer, error) {
 	payloadLength := 5 // comStmtReset (1) + s.id (4)
 
 	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
@@ -549,7 +699,7 @@ func (c *Conn) createComStmtReset(s *Stmt) (*bytes.Buffer, error) {
 }
 
 // createComStmtSendLongData generates the COM_STMT_SEND_LONG_DATA packet.
-func (c *Conn) createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) (*bytes.Buffer, error) {
+func createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) (*bytes.Buffer, error) {
 	payloadLength := 7 + // comStmtSendLongData(1) + s.id(4) + paramId(2)
 		len(data) // length of data
 
@@ -563,7 +713,17 @@ func (c *Conn) createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) (
 	return b, nil
 }
 
-func (c *Conn) parseBinaryResultSetRowPacket(b *bytes.Buffer, columnCount uint64) *row {
+// parseStmtPrepareOk parses COM_STMT_PREPARE_OK packet.
+func (s *Stmt) parseStmtPrepareOkPacket(b *bytes.Buffer) {
+	b.Next(1) // [00] OK
+	s.id = binary.LittleEndian.Uint32(b.Next(4))
+	s.columnCount = binary.LittleEndian.Uint16(b.Next(2))
+	s.paramCount = binary.LittleEndian.Uint16(b.Next(2))
+	b.Next(1) // reserved [00] filler
+	s.warningCount = binary.LittleEndian.Uint16(b.Next(2))
+}
+
+func parseBinaryResultSetRowPacket(b *bytes.Buffer, columnCount uint64) *row {
 	r := new(row)
 	r.columns = make([]interface{}, columnCount)
 
@@ -576,6 +736,65 @@ func (c *Conn) parseBinaryResultSetRowPacket(b *bytes.Buffer, columnCount uint64
 	}
 
 	return nil
+}
+
+func (c *Conn) handleComStmtPrepareResponse() (*Stmt, error) {
+	var (
+		err error
+		b   []byte
+	)
+	s := new(Stmt)
+	s.paramDefs = make([]*columnDefinition, 0)
+	s.columnDefs = make([]*columnDefinition, 0)
+
+	// read COM_STMT_PREPARE_OK packet.
+	if b, err = c.readPacket(); err != nil {
+		return nil, err
+	}
+
+	switch b[0] {
+	case okPacket: // COM_STMT_PREPARE_OK packet
+		s.parseStmtPrepareOkPacket(bytes.NewBuffer(b))
+	case errPacket:
+		c.parseErrPacket(bytes.NewBuffer(b))
+		return nil, &c.e
+	}
+
+	// parameter definition block: read param definition packet(s)
+	for i := uint16(0); i < s.paramCount; i++ {
+		if b, err = c.readPacket(); err != nil {
+			return nil, err
+		} else {
+			s.paramDefs = append(s.paramDefs,
+				parseColumnDefinitionPacket(bytes.NewBuffer(b), false))
+		}
+	}
+
+	// read EOF packet
+	if b, err = c.readPacket(); err != nil {
+		return nil, err
+	} else {
+		c.parseEOFPacket(bytes.NewBuffer(b))
+	}
+
+	// column definition block: read column definition packet(s)
+	for i := uint16(0); i < s.columnCount; i++ {
+		if b, err = c.readPacket(); err != nil {
+			return nil, err
+		} else {
+			s.columnDefs = append(s.columnDefs,
+				parseColumnDefinitionPacket(bytes.NewBuffer(b), false))
+		}
+	}
+
+	// read EOF packet
+	if b, err = c.readPacket(); err != nil {
+		return nil, err
+	} else {
+		c.parseEOFPacket(bytes.NewBuffer(b))
+	}
+
+	return s, nil
 }
 
 // mysql data types

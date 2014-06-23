@@ -13,8 +13,8 @@ type Stmt struct {
 	columnCount  uint16
 	paramCount   uint16
 	warningCount uint16
-	columnDefs   []*columnDefinition
 	paramDefs    []*columnDefinition
+	columnDefs   []*columnDefinition
 
 	// COM_STMT_EXECUTE
 	flags              uint8

@@ -7,6 +7,7 @@ import (
 type Conn struct {
 	// connection properties
 	p properties
+	n _net
 
 	// OK packet
 	affectedRows uint64
@@ -31,6 +32,9 @@ type Conn struct {
 	maxPacketSize         uint32
 	clientCharacterSet    uint8
 	authResponseData      string
+
+	sequenceId uint8 // packet sequence number
+
 }
 
 func (c *Conn) Prepare(query string) (driver.Stmt, error) {
