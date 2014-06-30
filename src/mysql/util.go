@@ -78,6 +78,11 @@ func putLenencString(b *bytes.Buffer, v string) {
 	b.WriteString(v)
 }
 
+func putLenencBlob(b *bytes.Buffer, v []byte) {
+	putLenencInteger(b, uint64(len(v)))
+	b.Write(v)
+}
+
 func putNullTerminatedString(b *bytes.Buffer, v string) {
 	b.WriteString(v)
 	b.Next(1) // null terminator

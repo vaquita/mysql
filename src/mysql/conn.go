@@ -33,6 +33,9 @@ type Conn struct {
 	clientCharacterSet    uint8
 	authResponseData      string
 
+	// prepared statement
+	s *Stmt
+
 	sequenceId uint8 // packet sequence number
 
 }

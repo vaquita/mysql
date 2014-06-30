@@ -5,7 +5,7 @@ import (
 )
 
 type Rows struct {
-	columnCount uint64
+	columnCount uint16
 	columnDefs  []*columnDefinition
 	rows        []*row
 }

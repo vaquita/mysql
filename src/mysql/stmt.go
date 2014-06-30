@@ -14,14 +14,12 @@ type Stmt struct {
 	paramCount   uint16
 	warningCount uint16
 	paramDefs    []*columnDefinition
-	columnDefs   []*columnDefinition
+	columnDefs   []*columnDefinition // is this really required?
 
 	// COM_STMT_EXECUTE
 	flags              uint8
 	iterationCount     uint32
-	nullBitmap         []byte
 	newParamsBoundFlag uint8
-	paramType          []uint16
 	paramValue         []interface{}
 	paramValueLength   int // simple optimization, length of values all the parameters
 }
