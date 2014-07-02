@@ -7,24 +7,31 @@ import (
 // formula :
 // SHA1(password) XOR SHA1("20-byte public seed from server" <concat> SHA1( SHA1( password)))
 
-func scramble41(password string, seed []byte) [20]byte {
-	var final [sha1.Size]byte
-
-	h1 := sha1.New()
-	h1.Write([]byte(password))
-	hashStage1 := h1.Sum(nil)
-
-	h2 := sha1.New()
-	h2.Write(hashStage1)
-	hashStage2 := h2.Sum(nil)
-
-	h := sha1.New()
-	h.Write(seed)
-	tmp := h.Sum(hashStage2)
-
-	for i := 0; i < sha1.Size; i++ {
-		final[i] = hashStage1[i] ^ tmp[i]
+func scramble41(password string, seed []byte) (buf []byte) {
+	if len(password) == 0 {
+		return
 	}
 
-	return final
+	hash := sha1.New()
+
+	// stage 1: SHA1(password)
+	hash.Write([]byte(password))
+	hashStage1 := hash.Sum(nil)
+
+	// stage 2: SHA1(SHA1(password))
+	hash.Reset()
+	hash.Write(hashStage1)
+	hashStage2 := hash.Sum(nil)
+
+	// SHA1("20-byte public seed from server" <concat> SHA1(SHA1(password)))
+	hash.Reset()
+	hash.Write(seed)
+	hash.Write(hashStage2)
+	buf = hash.Sum(nil)
+
+	for i := 0; i < sha1.Size; i++ {
+		buf[i] ^= hashStage1[i]
+	}
+
+	return
 }
