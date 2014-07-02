@@ -718,6 +718,3 @@ func writeTime(b *bytes.Buffer, v time.Duration) {
 	}
 	return
 }
-
-func writeNull() {
-}
