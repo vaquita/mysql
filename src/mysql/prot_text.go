@@ -255,13 +255,16 @@ func createHandshakeResponsePacket(c *Conn) *bytes.Buffer {
 
 	putNullTerminatedString(b, c.p.username)
 
-	if (c.serverCapabilityFlags & clientPluginAuthLenencClientData) != 0 {
-		putLenencString(b, c.authResponseData)
-	} else if (c.serverCapabilityFlags & clientSecureConnection) != 0 {
-		b.WriteByte(byte(len(c.authResponseData)))
-		b.WriteString(c.authResponseData)
-	} else {
-		putNullTerminatedString(b, c.authResponseData)
+	// auth response data
+	if data := c.authResponseData(); len(data) > 0 {
+		if (c.serverCapabilityFlags & clientPluginAuthLenencClientData) != 0 {
+			putLenencString(b, string(data))
+		} else if (c.serverCapabilityFlags & clientSecureConnection) != 0 {
+			b.WriteByte(byte(len(data)))
+			b.Write(data)
+		} else {
+			putNullTerminatedString(b, string(data))
+		}
 	}
 
 	if (c.serverCapabilityFlags & clientConnectWithDb) != 0 {

@@ -5,16 +5,18 @@ import (
 )
 
 type Stmt struct {
+	id uint32
+
 	// COM_STMT_PREPARE
 	query string
 
 	// COM_STMT_PREPARE response
-	id           uint32
 	columnCount  uint16
 	paramCount   uint16
 	warningCount uint16
-	paramDefs    []*columnDefinition
-	columnDefs   []*columnDefinition // is this really required?
+	// TODO: where to use the following received column definitions?
+	paramDefs  []*columnDefinition
+	columnDefs []*columnDefinition
 
 	// COM_STMT_EXECUTE
 	flags              uint8

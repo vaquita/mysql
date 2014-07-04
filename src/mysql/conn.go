@@ -18,7 +18,7 @@ type Conn struct {
 	// ERR packet
 	e Error
 
-	// handshake initialization packet
+	// handshake initialization packet (from server)
 	serverVersion         string
 	connectionId          uint32
 	serverCapabilityFlags uint32
@@ -27,17 +27,15 @@ type Conn struct {
 	authPluginData        string
 	authPluginName        string
 
-	// handshake response packet
+	// handshake response packet (from client)
 	clientCapabilityFlags uint32
 	maxPacketSize         uint32
 	clientCharacterSet    uint8
-	authResponseData      string
 
 	// prepared statement
 	s *Stmt
 
 	sequenceId uint8 // packet sequence number
-
 }
 
 func (c *Conn) Prepare(query string) (driver.Stmt, error) {
