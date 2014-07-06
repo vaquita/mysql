@@ -32,19 +32,15 @@ type Conn struct {
 	maxPacketSize         uint32
 	clientCharacterSet    uint8
 
-	// prepared statement
-	s *Stmt
-
 	sequenceId uint8 // packet sequence number
 }
 
 func (c *Conn) Prepare(query string) (driver.Stmt, error) {
-	stmt := &Stmt{}
-	return stmt, nil
+	return c.handleStmtPrepare(query)
 }
 
 func (c *Conn) Close() error {
-	return nil
+	return c.handleComQuit()
 }
 
 func (c *Conn) Begin() (driver.Tx, error) {
@@ -53,11 +49,9 @@ func (c *Conn) Begin() (driver.Tx, error) {
 }
 
 func (c *Conn) Exec(query string, args []driver.Value) (driver.Result, error) {
-	result := &Result{}
-	return result, nil
+	return c.handleExec(query, args)
 }
 
 func (c *Conn) Query(query string, args []driver.Value) (driver.Rows, error) {
-	rows := &Rows{}
-	return rows, nil
+	return c.handleQuery(query, args)
 }

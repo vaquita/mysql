@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"net/url"
-	"strconv"
 	"strings"
 )
 
@@ -24,15 +23,18 @@ import (
   eg. "mysql://root:pass@localhost:3306/test?socket=/tmp/mysql.sock"
 */
 
+const (
+	defaultHost = "127.0.0.1"
+	defaultPort = "3306"
+)
+
 type properties struct {
 	username    string
 	password    string
 	passwordSet bool
-	host        string
-	port        uint16
+	address     string // host:port
+	socket      string
 	schema      string
-
-	socket string
 }
 
 func (p *properties) parseUrl(dsn string) error {
@@ -45,7 +47,8 @@ func (p *properties) parseUrl(dsn string) error {
 		p.username = u.User.Username()
 		p.password, p.passwordSet = u.User.Password()
 	}
-	p.host, p.port = getHostPort(u.Host)
+	p.address = u.Host
+	p.address = parseHost(u.Host)
 	p.schema = strings.TrimLeft(u.Path, "/")
 	query := u.Query()
 	p.socket = query.Get("socket")
@@ -53,25 +56,48 @@ func (p *properties) parseUrl(dsn string) error {
 	return nil
 }
 
-func getHostPort(hostPort string) (host string, port uint16) {
-	v := strings.Split(hostPort, ":")
+// address returns the address in 'host:port' format. default ip (127.0.0.1) and
+// port (3306) are used if not specified.
+func parseHost(addr string) string {
+	var (
+		host, port      string
+		defaultAssigned bool
+	)
+
+	v := strings.Split(addr, ":")
 
 	switch len(v) {
 	case 2:
 		host = v[0]
-		if p, err := strconv.ParseUint(v[1], 10, 16); err != nil {
-			port = 3306
-		} else {
-			port = uint16(p)
+		port = v[1]
+
+		if host == "" {
+			host = defaultHost
+			defaultAssigned = true
 		}
+
+		if port == "" {
+			port = defaultPort
+			defaultAssigned = true
+		}
+
+		if defaultAssigned == false {
+			return addr // addr is already in required format
+		}
+		break
+
 	case 1:
 		host = v[0]
-		port = 3306
+		if host == "" {
+			host = defaultHost
+		}
+		port = defaultPort
 	case 0:
 		fallthrough
 	default:
-		host = "127.0.0.1"
-		port = 3306
+		host = defaultHost
+		port = defaultPort
+		break
 	}
-	return
+	return strings.Join([]string{host, port}, ":")
 }

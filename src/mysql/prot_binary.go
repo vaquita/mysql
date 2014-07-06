@@ -2,12 +2,11 @@ package mysql
 
 import (
 	"bytes"
+	"database/sql/driver"
 	"encoding/binary"
 	"math"
 	"time"
 )
-
-//<!-- prepared statements -->
 
 // createComStmtPrepare generates the COM_STMT_PREPARE packet.
 func createComStmtPrepare(query string) (*bytes.Buffer, error) {
@@ -28,35 +27,24 @@ func createComStmtPrepare(query string) (*bytes.Buffer, error) {
 }
 
 // createComStmtExecute generates the COM_STMT_EXECUTE packet.
-func createComStmtExecute(s *Stmt) (*bytes.Buffer, error) {
+func createComStmtExecute(s *Stmt, args []driver.Value) (*bytes.Buffer, error) {
 	var (
 		b              *bytes.Buffer
 		paramType      *bytes.Buffer
 		nullBitmap     []byte
-		paramCount     int
 		nullBitmapSize int
+		paramCount     int
 		err            error
 	)
 
+	// TODO : assert(s.paramCount == len(args))
 	paramCount = int(s.paramCount)
 
 	// null bitmap, size = (paramCount + 7) / 8
 	nullBitmapSize = int((paramCount + 7) / 8)
 
-	// calculate the payload length
-	payloadLength := 1 + //comStmtPrepare
-		9 // id(4) + flags(1) + iterationCount(4)
-	if paramCount > 0 {
-		payloadLength += nullBitmapSize
-		payloadLength++ // newParamBoundFlag(1)
-
-		if s.newParamsBoundFlag == 1 {
-			payloadLength += paramCount * 2 // type of each paramater
-			payloadLength += s.paramValueLength
-		}
-	}
-
-	b = bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b = bytes.NewBuffer(make([]byte, packetHeaderSize+
+		comStmtExecutePayloadLength(s, args)))
 	b.Next(4) // placeholder for protocol packet header
 
 	b.WriteByte(comStmtExecute)
@@ -74,7 +62,7 @@ func createComStmtExecute(s *Stmt) (*bytes.Buffer, error) {
 			paramType = bytes.NewBuffer(b.Next(2 * paramCount))
 
 			for i := 0; i < int(s.paramCount); i++ {
-				switch v := s.paramValue[i].(type) {
+				switch v := args[i].(type) {
 				case int64:
 					binary.LittleEndian.PutUint16(paramType.Next(2),
 						uint16(mysqlTypeLongLong))
@@ -110,7 +98,7 @@ func createComStmtExecute(s *Stmt) (*bytes.Buffer, error) {
 					// set the corresponding null bit
 					nullBitmap[int(i/8)] |= 1 << uint(i%8)
 				default:
-					// error
+					// TODO: handle error
 				}
 			}
 		}
@@ -120,14 +108,14 @@ func createComStmtExecute(s *Stmt) (*bytes.Buffer, error) {
 }
 
 // createComStmtClose generates the COM_STMT_CLOSE packet.
-func createComStmtClose(s *Stmt) (*bytes.Buffer, error) {
+func createComStmtClose(sid uint32) (*bytes.Buffer, error) {
 	payloadLength := 5 // comStmtClose(1) + s.id(4)
 
 	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
 	b.Next(4) // placeholder for protocol packet header
 
 	b.WriteByte(comStmtClose)
-	binary.LittleEndian.PutUint32(b.Next(4), s.id)
+	binary.LittleEndian.PutUint32(b.Next(4), sid)
 
 	return b, nil
 }
@@ -161,6 +149,82 @@ func createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) (*bytes.Buf
 	return b, nil
 }
 
+// handleStmtPrepare handles COM_STMT_PREPARE and related packets
+func (c *Conn) handleStmtPrepare(query string) (s *Stmt, err error) {
+	var b *bytes.Buffer
+
+	// write COM_STMT_PREPARE packet
+	if b, err = createComStmtPrepare(query); err != nil {
+		return
+	}
+	if err = c.writePacket(b.Bytes()); err != nil {
+		return
+	}
+
+	// handle the response
+	return c.handleComStmtPrepareResponse()
+}
+
+func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
+	var b []byte
+
+	s = new(Stmt)
+	s.c = c
+
+	s.paramDefs = make([]*columnDefinition, 0)
+	s.columnDefs = make([]*columnDefinition, 0)
+
+	// read COM_STMT_PREPARE_OK packet.
+	if b, err = c.readPacket(); err != nil {
+		return
+	}
+
+	switch b[0] {
+	case okPacket: // COM_STMT_PREPARE_OK packet
+		s.parseStmtPrepareOkPacket(bytes.NewBuffer(b))
+	case errPacket:
+		c.parseErrPacket(bytes.NewBuffer(b))
+		err = &c.e
+		return
+	}
+
+	// parameter definition block: read param definition packet(s)
+	for i := uint16(0); i < s.paramCount; i++ {
+		if b, err = c.readPacket(); err != nil {
+			return
+		} else {
+			s.paramDefs = append(s.paramDefs,
+				parseColumnDefinitionPacket(bytes.NewBuffer(b), false))
+		}
+	}
+
+	// read EOF packet
+	if b, err = c.readPacket(); err != nil {
+		return
+	} else {
+		c.parseEOFPacket(bytes.NewBuffer(b))
+	}
+
+	// column definition block: read column definition packet(s)
+	for i := uint16(0); i < s.columnCount; i++ {
+		if b, err = c.readPacket(); err != nil {
+			return
+		} else {
+			s.columnDefs = append(s.columnDefs,
+				parseColumnDefinitionPacket(bytes.NewBuffer(b), false))
+		}
+	}
+
+	// read EOF packet
+	if b, err = c.readPacket(); err != nil {
+		return
+	} else {
+		c.parseEOFPacket(bytes.NewBuffer(b))
+	}
+
+	return
+}
+
 // parseStmtPrepareOk parses COM_STMT_PREPARE_OK packet.
 func (s *Stmt) parseStmtPrepareOkPacket(b *bytes.Buffer) {
 	b.Next(1) // [00] OK
@@ -171,176 +235,128 @@ func (s *Stmt) parseStmtPrepareOkPacket(b *bytes.Buffer) {
 	s.warningCount = binary.LittleEndian.Uint16(b.Next(2))
 }
 
-func (c *Conn) handleBinaryResultSetRow(b *bytes.Buffer, rs *Rows) *row {
-	columnCount := rs.columnCount
-	r := new(row)
-	r.columns = make([]interface{}, columnCount)
+// handleStmtExec handles COM_STMT_EXECUTE and related packets for Stmt's
+// Exec()
+func (s *Stmt) handleStmtExec(args []driver.Value) (*Result, error) {
+	var (
+		b   *bytes.Buffer
+		err error
+	)
 
-	b.Next(1) // packet header [00]
+	// send COM_STMT_EXECUTE to the server
+	if b, err = createComStmtExecute(s, args); err != nil {
+		return nil, err
+	}
+	if err = s.c.writePacket(b.Bytes()); err != nil {
+		return nil, err
+	}
 
-	// null bitmap
-	nullBitmap := b.Next(int((columnCount + 9) / 8))
+	return s.c.handleStmtExecResponse()
+}
 
-	for i := uint16(0); i < columnCount; i++ {
-		if isNull(nullBitmap, i) == true {
-			r.columns = append(r.columns, nil)
-		} else {
-			switch rs.columnDefs[i].columnType {
-			// string
-			case mysqlTypeString:
-				fallthrough
-			case mysqlTypeVarchar:
-				fallthrough
-			case mysqlTypeVarString:
-				fallthrough
-			case mysqlTypeEnum:
-				fallthrough
-			case mysqlTypeSet:
-				fallthrough
-			case mysqlTypeBlob:
-				fallthrough
-			case mysqlTypeTinyBlob:
-				fallthrough
-			case mysqlTypeMediumBlob:
-				fallthrough
-			case mysqlTypeLongBlob:
-				fallthrough
-			case mysqlTypeGeometry:
-				fallthrough
-			case mysqlTypeBit:
-				fallthrough
-			case mysqlTypeDecimal:
-				fallthrough
-			case mysqlTypeNewDecimal:
-				r.columns = append(r.columns, parseString(b))
+// handleStmtExecute handles COM_STMT_EXECUTE and related packets for Stmt's
+// Query()
+func (s *Stmt) handleStmtQuery(args []driver.Value) (*Rows, error) {
+	var (
+		b   *bytes.Buffer
+		err error
+	)
 
-			// uint64
-			case mysqlTypeLongLong:
-				r.columns = append(r.columns, parseUint64(b))
+	// send COM_STMT_EXECUTE to the server
+	if b, err = createComStmtExecute(s, args); err != nil {
+		return nil, err
+	}
+	if err = s.c.writePacket(b.Bytes()); err != nil {
+		return nil, err
+	}
 
-			// uint32
-			case mysqlTypeLong:
-				fallthrough
-			case mysqlTypeInt24:
-				r.columns = append(r.columns, parseUint32(b))
+	return s.c.handleStmtQueryResponse()
+}
 
-			// uint16
-			case mysqlTypeShort:
-				fallthrough
-			case mysqlTypeYear:
-				r.columns = append(r.columns, parseUint16(b))
+// comStmtExecutePayloadLength returns the payload size of COM_STMT_EXECUTE
+// packet.
+func comStmtExecutePayloadLength(s *Stmt, args []driver.Value) (length uint64) {
+	length = 1 + //comStmtPrepare
+		9 // id(4) + flags(1) + iterationCount(4)
 
-			// uint8
-			case mysqlTypeTiny:
-				r.columns = append(r.columns, parseUint8(b))
+	if s.paramCount > 0 {
+		// null bitmap, size = (paramCount + 7) / 8
+		length += uint64((s.paramCount + 7) / 8)
+		length++ // newParamBoundFlag(1)
 
-			// float64
-			case mysqlTypeDouble:
-				r.columns = append(r.columns, parseDouble(b))
-
-			// float32
-			case mysqlTypeFloat:
-				r.columns = append(r.columns, parseFloat(b))
-
-			// time.Time
-			case mysqlTypeDate:
-				fallthrough
-			case mysqlTypeDateTime:
-				fallthrough
-			case mysqlTypeTimestamp:
-				r.columns = append(r.columns, parseDate(b))
-
-			// time.Duration
-			case mysqlTypeTime:
-				r.columns = append(r.columns, parseTime(b))
-
-			// TODO: map the following unhandled types accordingly
-			case mysqlTypeNewDate:
-				fallthrough
-			case mysqlTypeTimeStamp2:
-				fallthrough
-			case mysqlTypeDateTime2:
-				fallthrough
-			case mysqlTypeTime2:
-				fallthrough
-			case mysqlTypeNull:
-				fallthrough
-			default:
+		if s.newParamsBoundFlag == 1 {
+			length += uint64(s.paramCount * 2) // type of each paramater
+			for i := 0; i < int(s.paramCount); i++ {
+				switch v := args[i].(type) {
+				case int64, float64:
+					length += 8
+				case bool:
+					length++
+				case []byte:
+					length +=
+						uint64(lenencIntegerSize(len(v)) + len(v))
+				case string:
+					length +=
+						uint64(lenencIntegerSize(len(v)) + len(v))
+				case time.Time:
+					dateSize(v)
+				case nil: // noop
+				default: // TODO: handle error
+				}
 			}
+
 		}
 	}
-	return r
+	return
 }
 
-// isNull returns whether the column at position identified by columnPosition
-// is NULL. columnPosition is the column's position starting with 0.
-func isNull(nullBitmap []byte, columnPosition uint16) bool {
-	// for binary protocol result set row offset = 2
-	columnPosition += 2
-
-	if (nullBitmap[columnPosition/8] & (1 << (columnPosition % 8))) == 1 {
-		return true // null
-	}
-	return false // not null
-}
-
-func (c *Conn) handleComStmtPrepareResponse() (*Stmt, error) {
+func (c *Conn) handleStmtExecResponse() (*Result, error) {
 	var (
 		err error
 		b   []byte
 	)
-	s := new(Stmt)
-	s.paramDefs = make([]*columnDefinition, 0)
-	s.columnDefs = make([]*columnDefinition, 0)
 
-	// read COM_STMT_PREPARE_OK packet.
 	if b, err = c.readPacket(); err != nil {
 		return nil, err
 	}
 
 	switch b[0] {
-	case okPacket: // COM_STMT_PREPARE_OK packet
-		s.parseStmtPrepareOkPacket(bytes.NewBuffer(b))
 	case errPacket:
 		c.parseErrPacket(bytes.NewBuffer(b))
 		return nil, &c.e
+	case okPacket:
+		c.parseOkPacket(bytes.NewBuffer(b))
+		break
+	default:
+		// TODO: handle error
 	}
 
-	// parameter definition block: read param definition packet(s)
-	for i := uint16(0); i < s.paramCount; i++ {
-		if b, err = c.readPacket(); err != nil {
-			return nil, err
-		} else {
-			s.paramDefs = append(s.paramDefs,
-				parseColumnDefinitionPacket(bytes.NewBuffer(b), false))
-		}
-	}
+	res := new(Result)
+	res.lastInsertId = int64(c.lastInsertId)
+	res.rowsAffected = int64(c.affectedRows)
+	return res, nil
+}
 
-	// read EOF packet
+func (c *Conn) handleStmtQueryResponse() (*Rows, error) {
+	var (
+		err error
+		b   []byte
+	)
+
 	if b, err = c.readPacket(); err != nil {
 		return nil, err
-	} else {
-		c.parseEOFPacket(bytes.NewBuffer(b))
 	}
 
-	// column definition block: read column definition packet(s)
-	for i := uint16(0); i < s.columnCount; i++ {
-		if b, err = c.readPacket(); err != nil {
-			return nil, err
-		} else {
-			s.columnDefs = append(s.columnDefs,
-				parseColumnDefinitionPacket(bytes.NewBuffer(b), false))
-		}
+	switch b[0] {
+	case errPacket:
+		c.parseErrPacket(bytes.NewBuffer(b))
+		return nil, &c.e
+	default: // result set
+		return c.handleBinaryResultSet()
 	}
 
-	// read EOF packet
-	if b, err = c.readPacket(); err != nil {
-		return nil, err
-	} else {
-		c.parseEOFPacket(bytes.NewBuffer(b))
-	}
-
-	return s, nil
+	// control shouldn't reach here
+	return nil, nil
 }
 
 func (c *Conn) handleBinaryResultSet() (*Rows, error) {
@@ -401,29 +417,86 @@ func (c *Conn) handleBinaryResultSet() (*Rows, error) {
 	return rs, nil
 }
 
-func (c *Conn) handleComStmtExecuteResponse() (*Rows, error) {
-	var (
-		err error
-		b   []byte
-	)
+func (c *Conn) handleBinaryResultSetRow(b *bytes.Buffer, rs *Rows) *row {
+	columnCount := rs.columnCount
+	r := new(row)
+	r.columns = make([]interface{}, columnCount)
 
-	if b, err = c.readPacket(); err != nil {
-		return nil, err
+	b.Next(1) // packet header [00]
+
+	// null bitmap
+	nullBitmap := b.Next(int((columnCount + 9) / 8))
+
+	for i := uint16(0); i < columnCount; i++ {
+		if isNull(nullBitmap, i) == true {
+			r.columns = append(r.columns, nil)
+		} else {
+			switch rs.columnDefs[i].columnType {
+			// string
+			case mysqlTypeString, mysqlTypeVarchar,
+				mysqlTypeVarString, mysqlTypeEnum,
+				mysqlTypeSet, mysqlTypeBlob,
+				mysqlTypeTinyBlob, mysqlTypeMediumBlob,
+				mysqlTypeLongBlob, mysqlTypeGeometry,
+				mysqlTypeBit, mysqlTypeDecimal,
+				mysqlTypeNewDecimal:
+				r.columns = append(r.columns, parseString(b))
+
+			// uint64
+			case mysqlTypeLongLong:
+				r.columns = append(r.columns, parseUint64(b))
+
+			// uint32
+			case mysqlTypeLong, mysqlTypeInt24:
+				r.columns = append(r.columns, parseUint32(b))
+
+			// uint16
+			case mysqlTypeShort, mysqlTypeYear:
+				r.columns = append(r.columns, parseUint16(b))
+
+			// uint8
+			case mysqlTypeTiny:
+				r.columns = append(r.columns, parseUint8(b))
+
+			// float64
+			case mysqlTypeDouble:
+				r.columns = append(r.columns, parseDouble(b))
+
+			// float32
+			case mysqlTypeFloat:
+				r.columns = append(r.columns, parseFloat(b))
+
+			// time.Time
+			case mysqlTypeDate, mysqlTypeDateTime,
+				mysqlTypeTimestamp:
+				r.columns = append(r.columns, parseDate(b))
+
+			// time.Duration
+			case mysqlTypeTime:
+				r.columns = append(r.columns, parseTime(b))
+
+			// TODO: map the following unhandled types accordingly
+			case mysqlTypeNewDate, mysqlTypeTimeStamp2,
+				mysqlTypeDateTime2, mysqlTypeTime2,
+				mysqlTypeNull:
+				fallthrough
+			default:
+			}
+		}
 	}
+	return r
+}
 
-	switch b[0] {
-	case errPacket:
-		c.parseErrPacket(bytes.NewBuffer(b))
-		return nil, &c.e
-	case okPacket:
-		c.parseOkPacket(bytes.NewBuffer(b))
-		return nil, nil
-	default: // result set
-		return c.handleBinaryResultSet()
+// isNull returns whether the column at position identified by columnPosition
+// is NULL. columnPosition is the column's position starting with 0.
+func isNull(nullBitmap []byte, columnPosition uint16) bool {
+	// for binary protocol result set row offset = 2
+	columnPosition += 2
+
+	if (nullBitmap[columnPosition/8] & (1 << (columnPosition % 8))) == 1 {
+		return true // null
 	}
-
-	// control shouldn't reach here
-	return nil, nil
+	return false // not null
 }
 
 // mysql data types
@@ -669,6 +742,37 @@ func writeDate(b *bytes.Buffer, v time.Time) {
 	return
 }
 
+// dateSize returns the size needed to store a given time.Time.
+func dateSize(v time.Time) (length int) {
+	var (
+		month, day, hour, min, sec uint8
+		year                       uint16
+		msec                       uint32
+	)
+
+	year = uint16(v.Year())
+	month = uint8(v.Month())
+	day = uint8(v.Day())
+	hour = uint8(v.Hour())
+	min = uint8(v.Minute())
+	sec = uint8(v.Second())
+	msec = uint32(v.Nanosecond() / 1000)
+
+	if hour == 0 && min == 0 && sec == 0 && msec == 0 {
+		if year == 0 && month == 0 && day == 0 {
+			return 0
+		} else {
+			length = 4
+		}
+	} else if msec == 0 {
+		length = 7
+	} else {
+		length = 11
+	}
+	length++ // 1 extra byte needed to store the length itself
+	return
+}
+
 func writeTime(b *bytes.Buffer, v time.Duration) {
 	var (
 		length, neg, hours, mins, secs uint8
@@ -717,4 +821,20 @@ func writeTime(b *bytes.Buffer, v time.Duration) {
 		binary.LittleEndian.PutUint32(b.Next(4), msecs)
 	}
 	return
+}
+
+// handleStmtClose handles COM_STMT_CLOSE and related packets
+func (s *Stmt) handleStmtClose() (err error) {
+	var b *bytes.Buffer
+
+	// write COM_STMT_CLOSE packet
+	if b, err = createComStmtClose(s.id); err != nil {
+		return
+	}
+	if err = s.c.writePacket(b.Bytes()); err != nil {
+		return
+	}
+
+	// note: expect no response from the server
+	return nil
 }

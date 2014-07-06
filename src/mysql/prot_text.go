@@ -2,8 +2,10 @@ package mysql
 
 import (
 	"bytes"
+	"database/sql/driver"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"time"
 )
 
@@ -195,9 +197,9 @@ func (c *Conn) parseEOFPacket(b *bytes.Buffer) {
 
 //<!-- connection phase packets -->
 
-// parseHandshakePacket parses handshake initialization packet received from
+// parseGreetingPacket parses handshake initialization packet received from
 // the server.
-func (c *Conn) parseHandshakePacket(b *bytes.Buffer) {
+func (c *Conn) parseGreetingPacket(b *bytes.Buffer) {
 	var authPluginDataBuf bytes.Buffer
 
 	b.Next(1)                                              // [0a] protocol version
@@ -240,7 +242,7 @@ func (c *Conn) parseHandshakePacket(b *bytes.Buffer) {
 }
 
 // createHandshakeResponsePacket generates the handshake response packet.
-func createHandshakeResponsePacket(c *Conn) *bytes.Buffer {
+func (c *Conn) createHandshakeResponsePacket() *bytes.Buffer {
 	payloadLength := c.handshakeResponsePacketLength()
 
 	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
@@ -288,15 +290,15 @@ func (c *Conn) handshakeResponsePacketLength() int {
 //<!-- command phase packets -->
 
 // createComQuit generates the COM_QUIT packet.
-func createComQuit() (*bytes.Buffer, error) {
+func createComQuit() (b *bytes.Buffer) {
 	payloadLength := 1 // comQuit
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
+	b = bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
 	b.Next(4) // placeholder for protocol packet header
 
 	b.WriteByte(comQuit)
 
-	return b, nil
+	return
 }
 
 // createComInitDb generates the COM_INIT_DB packet.
@@ -501,32 +503,121 @@ func parseColumnDefinitionPacket(b *bytes.Buffer, isComFieldList bool) *columnDe
 	return col
 }
 
-func parseResultSetRowPacket(b *bytes.Buffer, columnCount uint64) *row {
-	var val NullString
+// handleExec handles COM_QUERY and related packets for Conn's Exec()
+func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, error) {
+	var (
+		b      *bytes.Buffer
+		err    error
+		_query string
+		_args  []interface{}
+	)
 
-	r := new(row)
-	r.columns = make([]interface{}, columnCount)
-
-	for i := uint64(0); i < columnCount; i++ {
-		val = getLenencString(b)
-		if val.valid == true {
-			r.columns = append(r.columns, val.value)
-		} else {
-			r.columns = append(r.columns, nil)
+	// TODO: find a better way to perform the []driver.Value ->
+	// []interface{} conversion
+	_args = make([]interface{}, len(args))
+	for i := 0; i < len(args); i++ {
+		switch v := args[i].(type) {
+		default:
+			_args[i] = v
 		}
 	}
 
-	return r
+	// TODO: prepare query from the give args
+	fmt.Sprintf(_query, _args...)
+
+	// send COM_QUERY to the server
+	if b, err = createComQuery(_query); err != nil {
+		return nil, err
+	}
+	if err = c.writePacket(b.Bytes()); err != nil {
+		return nil, err
+	}
+
+	return c.handleExecResponse()
 }
 
-func (c *Conn) handleResultSetRow(b *bytes.Buffer, rs *Rows) *row {
-	r := new(row)
-	r.columns = make([]interface{}, 0)
+// handleQuery handles COM_QUERY and related packets for Conn's Query()
+func (c *Conn) handleQuery(query string, args []driver.Value) (driver.Rows, error) {
+	var (
+		b      *bytes.Buffer
+		err    error
+		_query string
+		_args  []interface{}
+	)
 
-	for i := uint16(0); i < rs.columnCount; i++ {
-		r.columns = append(r.columns, getLenencString(b))
+	// TODO: find a better way to perform the []driver.Value ->
+	// []interface{} conversion
+	_args = make([]interface{}, len(args))
+	for i := 0; i < len(args); i++ {
+		switch v := args[i].(type) {
+		default:
+			_args[i] = v
+		}
 	}
-	return r
+
+	// TODO: prepare query from the give args
+	fmt.Sprintf(_query, _args...)
+
+	// send COM_QUERY to the server
+	if b, err = createComQuery(_query); err != nil {
+		return nil, err
+	}
+	if err = c.writePacket(b.Bytes()); err != nil {
+		return nil, err
+	}
+
+	return c.handleQueryResponse()
+}
+
+func (c *Conn) handleExecResponse() (*Result, error) {
+	var (
+		err error
+		b   []byte
+	)
+
+	if b, err = c.readPacket(); err != nil {
+		return nil, err
+	}
+
+	switch b[0] {
+	case errPacket:
+		c.parseErrPacket(bytes.NewBuffer(b))
+		return nil, &c.e
+	case okPacket:
+		c.parseOkPacket(bytes.NewBuffer(b))
+		break
+	default:
+		// TODO: handle error
+	}
+
+	res := new(Result)
+	res.lastInsertId = int64(c.lastInsertId)
+	res.rowsAffected = int64(c.affectedRows)
+	return res, nil
+}
+
+func (c *Conn) handleQueryResponse() (*Rows, error) {
+	var (
+		err error
+		b   []byte
+	)
+
+	if b, err = c.readPacket(); err != nil {
+		return nil, err
+	}
+
+	switch b[0] {
+	case errPacket:
+		c.parseErrPacket(bytes.NewBuffer(b))
+		return nil, &c.e
+	case localInfileRequestPacket: // local infile request
+		// TODO: add support for local infile request
+	default: // result set
+		return c.handleResultSet()
+	}
+
+	// control shouldn't reach here
+	return nil, nil
 }
 
 func (c *Conn) handleResultSet() (*Rows, error) {
@@ -587,29 +678,34 @@ func (c *Conn) handleResultSet() (*Rows, error) {
 	return rs, nil
 }
 
-func (c *Conn) handleComQueryResponse() (*Rows, error) {
-	var (
-		err error
-		b   []byte
-	)
+func parseResultSetRowPacket(b *bytes.Buffer, columnCount uint64) *row {
+	var val NullString
 
-	if b, err = c.readPacket(); err != nil {
-		return nil, err
+	r := new(row)
+	r.columns = make([]interface{}, columnCount)
+
+	for i := uint64(0); i < columnCount; i++ {
+		val = getLenencString(b)
+		if val.valid == true {
+			r.columns = append(r.columns, val.value)
+		} else {
+			r.columns = append(r.columns, nil)
+		}
 	}
 
-	switch b[0] {
-	case errPacket:
-		c.parseErrPacket(bytes.NewBuffer(b))
-		return nil, &c.e
-	case okPacket:
-		c.parseOkPacket(bytes.NewBuffer(b))
-		return nil, nil
-	case localInfileRequestPacket: // local infile request
-		// TODO: add support for local infile request
-	default: // result set
-		return c.handleResultSet()
-	}
+	return r
+}
 
-	// control shouldn't reach here
-	return nil, nil
+func (c *Conn) handleResultSetRow(b *bytes.Buffer, rs *Rows) *row {
+	r := new(row)
+	r.columns = make([]interface{}, 0)
+
+	for i := uint16(0); i < rs.columnCount; i++ {
+		r.columns = append(r.columns, getLenencString(b))
+	}
+	return r
+}
+
+func (c *Conn) handleComQuit() error {
+	return c.writePacket(createComQuit().Bytes())
 }

@@ -6,6 +6,7 @@ import (
 
 type Stmt struct {
 	id uint32
+	c  *Conn
 
 	// COM_STMT_PREPARE
 	query string
@@ -22,24 +23,20 @@ type Stmt struct {
 	flags              uint8
 	iterationCount     uint32
 	newParamsBoundFlag uint8
-	paramValue         []interface{}
-	paramValueLength   int // simple optimization, length of values all the parameters
 }
 
 func (s *Stmt) Close() error {
-	return nil
+	return s.handleStmtClose()
 }
 
 func (s *Stmt) NumInput() int {
-	return 0
+	return int(s.paramCount)
 }
 
 func (s *Stmt) Exec(args []driver.Value) (driver.Result, error) {
-	result := &Result{}
-	return result, nil
+	return s.handleStmtExec(args)
 }
 
-func (s *Stmt) Query(arg []driver.Value) (driver.Rows, error) {
-	rows := &Rows{}
-	return rows, nil
+func (s *Stmt) Query(args []driver.Value) (driver.Rows, error) {
+	return s.handleStmtQuery(args)
 }

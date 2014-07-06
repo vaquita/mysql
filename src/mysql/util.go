@@ -57,6 +57,23 @@ func putLenencInteger(b *bytes.Buffer, v uint64) {
 	return
 }
 
+// lenencIntegerSize returns the size needed to store a number using the
+// length-encoded integer format.
+func lenencIntegerSize(v int) int {
+	switch {
+	case v < 251:
+		return 1
+	case v >= 251 && v < 2^16:
+		return 3
+	case v >= 2^16 && v < 2^24:
+		return 4
+	case v >= 2^24 && v < 2^64:
+		return 9
+	}
+	// control shouldn't reach here
+	return 0
+}
+
 // length-encoded string
 func getLenencString(b *bytes.Buffer) NullString {
 	var str NullString

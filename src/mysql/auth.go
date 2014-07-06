@@ -1,8 +1,42 @@
 package mysql
 
 import (
+	"bytes"
 	"crypto/sha1"
 )
+
+// handshake performs handshake during connection establishment
+func (c *Conn) handshake() (err error) {
+	var b []byte
+
+	// read handshake initialization packet.
+	if b, err = c.readPacket(); err != nil {
+		return
+	}
+	c.parseGreetingPacket(bytes.NewBuffer(b))
+
+	// send handshake response packet
+	if err = c.writePacket(c.createHandshakeResponsePacket().Bytes()); err != nil {
+		return
+	}
+
+	// read server response
+	if b, err = c.readPacket(); err != nil {
+		return
+	}
+
+	switch b[0] {
+	case errPacket:
+		c.parseErrPacket(bytes.NewBuffer(b))
+		return &c.e
+	case okPacket:
+		c.parseOkPacket(bytes.NewBuffer(b))
+		return nil
+	default:
+		// TODO: invalid packet
+	}
+	return nil
+}
 
 // authResponseData returns the authentication response data to be sent to the
 // server.
