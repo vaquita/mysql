@@ -1,7 +1,6 @@
 package mysql
 
 import (
-	"bytes"
 	"database/sql/driver"
 	"encoding/binary"
 	"errors"
@@ -85,6 +84,16 @@ const (
 	clientRememberOptions
 )
 
+const (
+	clientCapabilityFlags = (clientLongPassword |
+		clientLongFlag |
+		clientTransactions |
+		clientProtocol41 |
+		clientSecureConnection |
+		clientMultiResults |
+		clientPluginAuth)
+)
+
 // server status flags
 const (
 	serverStatusInTrans = 1 << iota
@@ -118,7 +127,7 @@ func (c *Conn) readPacket() ([]byte, error) {
 	}
 
 	// payload length
-	payloadLength := getUint32_3(hBuf[0:3])
+	payloadLength := getUint24(hBuf[0:3])
 
 	// read and verify packet sequence ID
 	if c.sequenceId != uint8(hBuf[3]) {
@@ -142,8 +151,8 @@ func (c *Conn) writePacket(b []byte) error {
 	var err error
 
 	// populate the packet header
-	putUint32_3(b[0:3], uint32(len(b))) // payload length
-	b[3] = c.sequenceId                 // packet sequence ID
+	putUint24(b[0:3], uint32(len(b))) // payload length
+	b[3] = c.sequenceId               // packet sequence ID
 
 	// write it to the network
 	if _, err = c.n.write(b); err != nil {
@@ -166,235 +175,303 @@ const (
 )
 
 // parseOkPacket parses the OK packet received from the server.
-func (c *Conn) parseOkPacket(b *bytes.Buffer) {
-	b.Next(1) // [00] the OK header (= okPacket)
-	c.affectedRows = getLenencInteger(b)
-	c.lastInsertId = getLenencInteger(b)
+func (c *Conn) parseOkPacket(b []byte) {
+	var off, n int
 
-	c.statusFlags = binary.LittleEndian.Uint16(b.Next(2))
-	c.warnings = binary.LittleEndian.Uint16(b.Next(2))
+	off++ // [00] the OK header (= okPacket)
+	c.affectedRows, n = getLenencInt(b[off:])
+	off += n
+	c.lastInsertId, n = getLenencInt(b[off:])
+	off += n
+
+	c.statusFlags = binary.LittleEndian.Uint16(b[off : off+2])
+	off += 2
+	c.warnings = binary.LittleEndian.Uint16(b[off : off+2])
+	off += 2
 	// TODO : read rest of the fields
 }
 
 // parseErrPacket parses the ERR packet received from the server.
-func (c *Conn) parseErrPacket(b *bytes.Buffer) {
-	b.Next(1) // [ff] the ERR header (= errPacket)
+func (c *Conn) parseErrPacket(b []byte) {
+	var off int
 
-	c.e.code = binary.LittleEndian.Uint16(b.Next(2))
-	b.Next(1) // '#' the sql-state marker
-	c.e.sqlState = string(b.Next(5))
-	c.e.message = string(b.Next(b.Len()))
+	off++ // [ff] the ERR header (= errPacket)
+	c.e.code = binary.LittleEndian.Uint16(b[off : off+2])
+	off += 2
+	off++ // '#' the sql-state marker
+	c.e.sqlState = string(b[off : off+5])
+	off += 5
+	c.e.message = string(b[off:])
 	c.e.when = time.Now()
 }
 
 // parseEOFPacket parses the EOF packet received from the server.
-func (c *Conn) parseEOFPacket(b *bytes.Buffer) {
-	b.Next(1) // [fe] the EOF header (= eofPacket)
+func (c *Conn) parseEOFPacket(b []byte) {
+	var off int
+
+	off++ // [fe] the EOF header (= eofPacket)
 	// TODO: reset warning count
-	c.warnings += binary.LittleEndian.Uint16(b.Next(2))
-	c.statusFlags = binary.LittleEndian.Uint16(b.Next(2))
+	c.warnings += binary.LittleEndian.Uint16(b[off : off+2])
+	off += 2
+	c.statusFlags = binary.LittleEndian.Uint16(b[off : off+2])
 }
 
 //<!-- connection phase packets -->
 
 // parseGreetingPacket parses handshake initialization packet received from
 // the server.
-func (c *Conn) parseGreetingPacket(b *bytes.Buffer) {
-	var authPluginDataBuf bytes.Buffer
+func (c *Conn) parseGreetingPacket(b []byte) {
+	var (
+		off, n                       int
+		authData                     []byte // authentiication plugin data
+		authDataLength               int
+		authDataOff_1, authDataOff_2 int
+	)
 
-	b.Next(1)                                              // [0a] protocol version
-	c.serverVersion, _ = b.ReadString(0)                   // server version (null-terminated)
-	c.connectionId = binary.LittleEndian.Uint32(b.Next(4)) // connection ID
+	off++                                                 // [0a] protocol version
+	c.serverVersion, n = getNullTerminatedString(b[off:]) // server version (null-terminated)
+	off += n
 
-	// auth-plugin-data-part-1 (8 bytes)
-	authPluginDataBuf.WriteString(string(b.Next(8)))
+	c.connectionId = binary.LittleEndian.Uint32(b[off : off+4]) // connection ID
+	off += 4
 
-	b.Next(1) // [00] filler
+	// auth-plugin-data-part-1 (8 bytes) : note the offset & length
+	authDataOff_1 = off
+	authDataLength = 8
+	off += 8
+
+	off++ // [00] filler
+
 	// capacity flags (lower 2 bytes)
-	c.serverCapabilityFlags = uint32(binary.LittleEndian.Uint16(b.Next(2)))
+	c.serverCapabilityFlags = uint32(binary.LittleEndian.Uint16(b[off : off+2]))
+	off += 2
 
-	if b.Len() > 0 {
-		c.serverCharacterSet = uint8(b.Next(1)[0])
-		c.statusFlags = binary.LittleEndian.Uint16(b.Next(2)) // status flags
+	if len(b) > off {
+		c.serverCharacterSet = uint8(b[off])
+		off++
+
+		c.statusFlags = binary.LittleEndian.Uint16(b[off : off+2]) // status flags
+		off += 2
 		// capacity flags (upper 2 bytes)
-		c.serverCapabilityFlags = uint32(binary.LittleEndian.Uint16(b.Next(2)) << 2)
+		c.serverCapabilityFlags = uint32(binary.LittleEndian.Uint16(b[off:off+2]) << 2)
+		off += 2
 
 		if (c.serverCapabilityFlags & clientPluginAuth) != 0 {
-			c.authPluginDataLength = uint8(b.Next(1)[0])
+			// update the auth plugin data length
+			authDataLength = int(b[off])
+			off++
 		} else {
-			b.Next(1) // [00]
+			off++ // [00]
 		}
 
-		b.Next(10) // reserved (all [00])
+		off += 10 // reserved (all [00])
 
 		if (c.serverCapabilityFlags & clientSecureConnection) != 0 {
-			// auth-plugin-data-part-1 (8 bytes)
-			// max(13, c.authPluginDataLength - 8)
-			authPluginDataBuf.WriteString(string(b.Next(13)))
+			// auth-plugin-data-part-2 : note the offset & update
+			// the length (max(13, authDataLength- 8)
+			if (authDataLength - 8) > 13 {
+				authDataLength = 13 + 8
+			}
+			authDataOff_2 = off
+			off += (authDataLength - 8)
 		}
-		c.authPluginData = authPluginDataBuf.String()
+		authData = make([]byte, authDataLength)
+		copy(authData[0:8], b[authDataOff_1:authDataOff_1+8])
+		if authDataLength > 8 {
+			copy(authData[8:], b[authDataOff_2:authDataOff_2+(authDataLength-8)])
+		}
+
+		c.authPluginData = authData
 
 		if (c.serverCapabilityFlags & clientPluginAuth) != 0 {
 			// auth-plugin name (null-terminated)
-			c.authPluginName, _ = b.ReadString(0)
+			c.authPluginName, n = getNullTerminatedString(b[off:])
+			off += n
 		}
 	}
 }
 
 // createHandshakeResponsePacket generates the handshake response packet.
-func (c *Conn) createHandshakeResponsePacket() *bytes.Buffer {
-	payloadLength := c.handshakeResponsePacketLength()
+func (c *Conn) createHandshakeResponsePacket() []byte {
+	var (
+		off        int
+		authData   []byte // auth response data
+		authLength int    // auth response data length
+	)
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	authData = c.authResponseData()
+	authLength = len(authData)
+
+	b := make([]byte, packetHeaderSize+
+		c.handshakeResponsePayloadLength(authLength))
+	off += 4 // placeholder for protocol packet header
 
 	// client capability flags
-	binary.LittleEndian.PutUint32(b.Next(4), c.clientCapabilityFlags)
+	binary.LittleEndian.PutUint32(b[off:off+4], clientCapabilityFlags)
+	off += 4
+
 	// max packaet size
-	binary.LittleEndian.PutUint32(b.Next(4), c.maxPacketSize)
-	b.WriteByte(c.clientCharacterSet) // client character set
-	b.Next(23)                        // reserved (all [0])
+	binary.LittleEndian.PutUint32(b[off:off+4], c.maxPacketSize)
+	off += 4
 
-	putNullTerminatedString(b, c.p.username)
+	// client character set
+	b[off] = byte(c.clientCharacterSet) // client character set
+	off++
 
-	// auth response data
-	if data := c.authResponseData(); len(data) > 0 {
+	off += 23 // reserved (all [0])
+
+	off += putNullTerminatedString(b[off:], c.p.username)
+
+	if authLength > 0 {
 		if (c.serverCapabilityFlags & clientPluginAuthLenencClientData) != 0 {
-			putLenencString(b, string(data))
+			off += putLenencString(b, string(authData))
 		} else if (c.serverCapabilityFlags & clientSecureConnection) != 0 {
-			b.WriteByte(byte(len(data)))
-			b.Write(data)
+			b[off] = byte(authLength)
+			off++
+			off += copy(b[off:], authData)
 		} else {
-			putNullTerminatedString(b, string(data))
+			off += putNullTerminatedString(b[off:], string(authData))
 		}
 	}
 
 	if (c.serverCapabilityFlags & clientConnectWithDb) != 0 {
-		putNullTerminatedString(b, c.p.schema)
+		off += putNullTerminatedString(b[off:], c.p.schema)
 	}
 
 	if (c.serverCapabilityFlags & clientPluginAuth) != 0 {
-		putNullTerminatedString(b, c.authPluginName)
+		off += putNullTerminatedString(b[off:], c.authPluginName)
 	}
 
 	if (c.serverCapabilityFlags & clientConnectAttrs) != 0 {
 		// TODO: handle connection attributes
 	}
+
 	return b
 }
 
-func (c *Conn) handshakeResponsePacketLength() int {
-	return 0
+// handshakeResponsePayloadLength returns the payload length of the handshake
+// response packet
+func (c *Conn) handshakeResponsePayloadLength(authLength int) (length int) {
+	length += (4 + 4 + 1 + 23)
+	length += (len(c.p.username) + 1) // null-terminated username
+	length += authLength
+
+	if (c.serverCapabilityFlags & clientConnectWithDb) != 0 {
+		length += (len(c.p.schema) + 1) // null-terminated schema name
+	}
+
+	if (c.serverCapabilityFlags & clientPluginAuth) != 0 {
+		length += (len(c.authPluginName) + 1) // null-terminated authentication plugin name
+	}
+
+	if (c.serverCapabilityFlags & clientConnectAttrs) != 0 {
+		// TODO: handle connection attributes
+	}
+	return
 }
 
 //<!-- command phase packets -->
 
 // createComQuit generates the COM_QUIT packet.
-func createComQuit() (b *bytes.Buffer) {
+func createComQuit() (b []byte) {
+	var off int
 	payloadLength := 1 // comQuit
 
-	b = bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
-
-	b.WriteByte(comQuit)
-
+	b = make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
+	b[off] = comQuit
 	return
 }
 
 // createComInitDb generates the COM_INIT_DB packet.
-func createComInitDb(schema string) (*bytes.Buffer, error) {
-	var err error
+func createComInitDb(schema string) []byte {
+	var off int
 
 	payloadLength := 1 + // comInitDb
 		len(schema) // length of schema name
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comInitDb)
-	if _, err = b.WriteString(schema); err != nil {
-		return nil, err
-	}
+	b[off] = comInitDb
+	off++
 
-	return b, nil
+	off += copy(b[off:], schema)
+	return b
 }
 
 // createComQuery generates the COM_QUERY packet.
-func createComQuery(query string) (*bytes.Buffer, error) {
-	var err error
+func createComQuery(query string) []byte {
+	var off int
 
 	payloadLength := 1 + // comQuery
 		len(query) // length of query
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comQuery)
-	if _, err = b.WriteString(query); err != nil {
-		return nil, err
-	}
+	b[off] = comQuery
+	off++
 
-	return b, nil
+	off += copy(b[off:], query)
+	return b
 }
 
 // createComFieldList generates the COM_FILED_LIST packet.
-func createComFieldList(table, fieldWildcard string) (*bytes.Buffer, error) {
-	var err error
+func createComFieldList(table, fieldWildcard string) []byte {
+	var off int
 
 	payloadLength := 1 + // comFieldList
 		len(table) + // length of table name
 		1 + // NULL
 		len(fieldWildcard) // length of field wildcard
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comFieldList)
-	if _, err = b.WriteString(table); err != nil {
-		return nil, err
-	}
-	b.WriteByte(0)
-	if _, err = b.WriteString(fieldWildcard); err != nil {
-		return nil, err
-	}
+	b[off] = comFieldList
+	off++
 
-	return b, nil
+	off += copy(b[off:], table)
+	off++
+
+	off += copy(b[off:], fieldWildcard)
+
+	return b
 }
 
 // createComCreateDb generates the COM_CREATE_DB packet.
-func createComCreateDb(schema string) (*bytes.Buffer, error) {
-	var err error
+func createComCreateDb(schema string) []byte {
+	var off int
 
 	payloadLength := 1 + // comCreateDb
 		len(schema) // length of schema name
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comCreateDb)
-	if _, err = b.WriteString(schema); err != nil {
-		return nil, err
-	}
+	b[off] = comCreateDb
+	off++
 
-	return b, nil
+	off += copy(b[off:], schema)
+	return b
 }
 
 // createComDropDb generates the COM_DROP_DB packet.
-func createComDropDb(schema string) (*bytes.Buffer, error) {
-	var err error
+func createComDropDb(schema string) []byte {
+	var off int
 
 	payloadLength := 1 + // comDropDb
 		len(schema) // length of schema name
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comDropDb)
-	if _, err = b.WriteString(schema); err != nil {
-		return nil, err
-	}
+	b[off] = comDropDb
+	off++
 
-	return b, nil
+	off += copy(b[off:], schema)
+	return b
 }
 
 type MyRefreshOption uint8
@@ -411,17 +488,20 @@ const (
 )
 
 // createComRefresh generates COM_REFRESH packet.
-func createComRefresh(subCommand uint8) (*bytes.Buffer, error) {
+func createComRefresh(subCommand uint8) []byte {
+	var off int
+
 	payloadLength := 1 + // comRefresh
 		1 // subCommand length
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comRefresh)
-	b.WriteByte(subCommand)
-
-	return b, nil
+	b[off] = comRefresh
+	off++
+	b[off] = subCommand
+	off++
+	return b
 }
 
 type MyShutdownLevel uint8
@@ -438,66 +518,86 @@ const (
 )
 
 // createComShutdown generates COM_SHUTDOWN packet.
-func createComShutdown(level MyShutdownLevel) (*bytes.Buffer, error) {
+func createComShutdown(level MyShutdownLevel) []byte {
+	var off int
+
 	payloadLength := 1 + // comShutdown
 		1 // shutdown level length
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comShutdown)
-	b.WriteByte(byte(level))
-
-	return b, nil
+	b[off] = comShutdown
+	off++
+	b[off] = byte(level)
+	off++
+	return b
 }
 
 // createComStatistics generates COM_STATISTICS packet.
-func createComStatistics() (*bytes.Buffer, error) {
+func createComStatistics() []byte {
+	var off int
+
 	payloadLength := 1 // comStatistics
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comStatistics)
+	b[off] = comStatistics
+	off++
 
-	return b, nil
+	return b
 }
 
 // createComProcessInfo generates COM_PROCESS_INFO packet.
-func createComProcessInfo() (*bytes.Buffer, error) {
+func createComProcessInfo() []byte {
+	var off int
+
 	payloadLength := 1 // comProcessInfo
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comProcessInfo)
-
-	return b, nil
+	b[off] = comProcessInfo
+	return b
 }
 
 // parseColumnDefinitionPacket parses the column (field) definition packet.
-func parseColumnDefinitionPacket(b *bytes.Buffer, isComFieldList bool) *columnDefinition {
+func parseColumnDefinitionPacket(b []byte, isComFieldList bool) *columnDefinition {
+	var off, n int
+
 	// alloc a new columnDefinition object
 	col := new(columnDefinition)
 
-	col.catalog = getLenencString(b)
-	col.schema = getLenencString(b)
-	col.table = getLenencString(b)
-	col.orgTable = getLenencString(b)
-	col.name = getLenencString(b)
-	col.orgName = getLenencString(b)
-	col.fixedLenFieldLength = getLenencInteger(b)
-	col.characterSet = binary.LittleEndian.Uint16(b.Next(2))
-	col.columnLength = binary.LittleEndian.Uint32(b.Next(4))
-	col.columnType = uint8(b.Next(1)[0])
-	col.flags = binary.LittleEndian.Uint16(b.Next(2))
-	col.decimals = uint8(b.Next(1)[0])
+	col.catalog, n = getLenencString(b[off:])
+	off += n
+	col.schema, n = getLenencString(b[off:])
+	off += n
+	col.table, n = getLenencString(b[off:])
+	off += n
+	col.orgTable, n = getLenencString(b[off:])
+	off += n
+	col.name, n = getLenencString(b[off:])
+	off += n
+	col.orgName, n = getLenencString(b[off:])
+	off += n
+	col.fixedLenFieldLength, n = getLenencInt(b[off:])
+	off += n
+	col.characterSet = binary.LittleEndian.Uint16(b[off : off+2])
+	off += 2
+	col.columnLength = binary.LittleEndian.Uint32(b[off : off+4])
+	off += 4
+	col.columnType = uint8(b[off])
+	off++
+	col.flags = binary.LittleEndian.Uint16(b[off : off+2])
+	off += 2
+	col.decimals = uint8(b[off])
+	off++
 
-	b.Next(2) //filler [00] [00]
+	off += 2 //filler [00] [00]
 
 	if isComFieldList == true {
-		len := getLenencInteger(b)
-		col.defaultValues = string(b.Next(int(len)))
+		col.defaultValues, _ = getLenencString(b)
 	}
 
 	return col
@@ -506,7 +606,6 @@ func parseColumnDefinitionPacket(b *bytes.Buffer, isComFieldList bool) *columnDe
 // handleExec handles COM_QUERY and related packets for Conn's Exec()
 func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, error) {
 	var (
-		b      *bytes.Buffer
 		err    error
 		_query string
 		_args  []interface{}
@@ -526,10 +625,7 @@ func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, err
 	fmt.Sprintf(_query, _args...)
 
 	// send COM_QUERY to the server
-	if b, err = createComQuery(_query); err != nil {
-		return nil, err
-	}
-	if err = c.writePacket(b.Bytes()); err != nil {
+	if err = c.writePacket(createComQuery(_query)); err != nil {
 		return nil, err
 	}
 
@@ -539,7 +635,6 @@ func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, err
 // handleQuery handles COM_QUERY and related packets for Conn's Query()
 func (c *Conn) handleQuery(query string, args []driver.Value) (driver.Rows, error) {
 	var (
-		b      *bytes.Buffer
 		err    error
 		_query string
 		_args  []interface{}
@@ -555,14 +650,10 @@ func (c *Conn) handleQuery(query string, args []driver.Value) (driver.Rows, erro
 		}
 	}
 
-	// TODO: prepare query from the give args
 	fmt.Sprintf(_query, _args...)
 
 	// send COM_QUERY to the server
-	if b, err = createComQuery(_query); err != nil {
-		return nil, err
-	}
-	if err = c.writePacket(b.Bytes()); err != nil {
+	if err = c.writePacket(createComQuery(_query)); err != nil {
 		return nil, err
 	}
 
@@ -581,10 +672,10 @@ func (c *Conn) handleExecResponse() (*Result, error) {
 
 	switch b[0] {
 	case errPacket:
-		c.parseErrPacket(bytes.NewBuffer(b))
+		c.parseErrPacket(b)
 		return nil, &c.e
 	case okPacket:
-		c.parseOkPacket(bytes.NewBuffer(b))
+		c.parseOkPacket(b)
 		break
 	default:
 		// TODO: handle error
@@ -608,7 +699,7 @@ func (c *Conn) handleQueryResponse() (*Rows, error) {
 
 	switch b[0] {
 	case errPacket:
-		c.parseErrPacket(bytes.NewBuffer(b))
+		c.parseErrPacket(b)
 		return nil, &c.e
 	case localInfileRequestPacket: // local infile request
 		// TODO: add support for local infile request
@@ -638,7 +729,8 @@ func (c *Conn) handleResultSet() (*Rows, error) {
 	}
 
 	// TODO: columnCount: uint16 or uint64 ??
-	rs.columnCount = uint16(getLenencInteger(bytes.NewBuffer(b)))
+	_columnCount, _ := getLenencInt(b)
+	rs.columnCount = uint16(_columnCount)
 
 	// read column definition packets
 	for i := uint16(0); i < rs.columnCount; i++ {
@@ -646,7 +738,7 @@ func (c *Conn) handleResultSet() (*Rows, error) {
 			return nil, err
 		} else {
 			rs.columnDefs = append(rs.columnDefs,
-				parseColumnDefinitionPacket(bytes.NewBuffer(b), false))
+				parseColumnDefinitionPacket(b, false))
 		}
 	}
 
@@ -654,7 +746,7 @@ func (c *Conn) handleResultSet() (*Rows, error) {
 	if b, err = c.readPacket(); err != nil {
 		return nil, err
 	} else {
-		c.parseEOFPacket(bytes.NewBuffer(b))
+		c.parseEOFPacket(b)
 	}
 
 	// read resultset row packets (each containing rs.columnCount values),
@@ -668,44 +760,37 @@ func (c *Conn) handleResultSet() (*Rows, error) {
 		case eofPacket:
 			done = true
 		case errPacket:
-			c.parseErrPacket(bytes.NewBuffer(b))
+			c.parseErrPacket(b)
 			return nil, &c.e
 		default: // result set row
 			rs.rows = append(rs.rows,
-				c.handleResultSetRow(bytes.NewBuffer(b), rs))
+				c.handleResultSetRow(b, rs))
 		}
 	}
 	return rs, nil
 }
 
-func parseResultSetRowPacket(b *bytes.Buffer, columnCount uint64) *row {
-	var val NullString
+func (c *Conn) handleResultSetRow(b []byte, rs *Rows) *row {
+	var (
+		v      NullString
+		off, n int
+	)
 
-	r := new(row)
-	r.columns = make([]interface{}, columnCount)
-
-	for i := uint64(0); i < columnCount; i++ {
-		val = getLenencString(b)
-		if val.valid == true {
-			r.columns = append(r.columns, val.value)
-		} else {
-			r.columns = append(r.columns, nil)
-		}
-	}
-
-	return r
-}
-
-func (c *Conn) handleResultSetRow(b *bytes.Buffer, rs *Rows) *row {
 	r := new(row)
 	r.columns = make([]interface{}, 0)
 
 	for i := uint16(0); i < rs.columnCount; i++ {
-		r.columns = append(r.columns, getLenencString(b))
+		v, n = getLenencString(b[off:])
+		if v.valid == true {
+			r.columns = append(r.columns, v.value)
+		} else {
+			r.columns = append(r.columns, nil)
+		}
+		off += n
 	}
 	return r
 }
 
 func (c *Conn) handleComQuit() error {
-	return c.writePacket(createComQuit().Bytes())
+	return c.writePacket(createComQuit())
 }

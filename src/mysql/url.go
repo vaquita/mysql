@@ -24,8 +24,9 @@ import (
 */
 
 const (
-	defaultHost = "127.0.0.1"
-	defaultPort = "3306"
+	defaultHost          = "127.0.0.1"
+	defaultPort          = "3306"
+	defaultMaxPacketSize = 1024 * 1024
 )
 
 type properties struct {

@@ -23,14 +23,12 @@ type Conn struct {
 	connectionId          uint32
 	serverCapabilityFlags uint32
 	serverCharacterSet    uint8
-	authPluginDataLength  uint8
-	authPluginData        string
+	authPluginData        []byte
 	authPluginName        string
 
 	// handshake response packet (from client)
-	clientCapabilityFlags uint32
-	maxPacketSize         uint32
-	clientCharacterSet    uint8
+	maxPacketSize      uint32
+	clientCharacterSet uint8
 
 	sequenceId uint8 // packet sequence number
 }

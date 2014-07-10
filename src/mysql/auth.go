@@ -1,7 +1,6 @@
 package mysql
 
 import (
-	"bytes"
 	"crypto/sha1"
 )
 
@@ -13,10 +12,11 @@ func (c *Conn) handshake() (err error) {
 	if b, err = c.readPacket(); err != nil {
 		return
 	}
-	c.parseGreetingPacket(bytes.NewBuffer(b))
+
+	c.parseGreetingPacket(b)
 
 	// send handshake response packet
-	if err = c.writePacket(c.createHandshakeResponsePacket().Bytes()); err != nil {
+	if err = c.writePacket(c.createHandshakeResponsePacket()); err != nil {
 		return
 	}
 
@@ -27,10 +27,10 @@ func (c *Conn) handshake() (err error) {
 
 	switch b[0] {
 	case errPacket:
-		c.parseErrPacket(bytes.NewBuffer(b))
+		c.parseErrPacket(b)
 		return &c.e
 	case okPacket:
-		c.parseOkPacket(bytes.NewBuffer(b))
+		c.parseOkPacket(b)
 		return nil
 	default:
 		// TODO: invalid packet
@@ -46,7 +46,7 @@ func (c *Conn) authResponseData() []byte {
 
 // formula :
 // SHA1(password) XOR SHA1("20-byte public seed from server" <concat> SHA1( SHA1( password)))
-func scramble41(password, seed string) (buf []byte) {
+func scramble41(password string, seed []byte) (buf []byte) {
 	if len(password) == 0 {
 		return
 	}
@@ -64,7 +64,7 @@ func scramble41(password, seed string) (buf []byte) {
 
 	// SHA1("20-byte public seed from server" <concat> SHA1(SHA1(password)))
 	hash.Reset()
-	hash.Write([]byte(seed))
+	hash.Write(seed)
 	hash.Write(hashStage2)
 	buf = hash.Sum(nil)
 

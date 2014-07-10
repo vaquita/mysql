@@ -23,7 +23,7 @@ type columnDefinition struct {
 	columnType          uint8
 	flags               uint16
 	decimals            uint8
-	defaultValues       string
+	defaultValues       NullString
 }
 
 type row struct {

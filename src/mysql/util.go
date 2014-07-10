@@ -1,65 +1,77 @@
 package mysql
 
 import (
-	"bytes"
 	"encoding/binary"
 )
 
-func getUint32_3(b []byte) uint32 {
-	return uint32(b[1]<<8) |
-		uint32(b[1]<<16) |
-		uint32(b[2]<<24)
+// getUint24 converts 3-byte byte slice into little-endian uint32
+func getUint24(b []byte) uint32 {
+	return uint32(b[0]) |
+		uint32(b[1]<<8) |
+		uint32(b[2]<<16)
 }
 
-func putUint32_3(b []byte, v uint32) {
+// putUint24 stores the given uint32 into the specified 3-byte byte slice in little-endian
+func putUint24(b []byte, v uint32) {
 	b[0] = byte(v)
 	b[1] = byte(v >> 8)
 	b[2] = byte(v >> 16)
 }
 
-// length-encoded integer
-func getLenencInteger(b *bytes.Buffer) uint64 {
-	first, _ := b.ReadByte()
+// setLenencInt retrieves the number from the specified buffer stored in
+// length-encoded integer format and returns the number of bytes written.
+func getLenencInt(b []byte) (v uint64, n int) {
+	first := b[0]
 
 	switch {
 	// 1-byte
 	case first <= 0xfb:
-		return uint64(first)
+		v = uint64(first)
+		n = 1
 	// 2-byte
 	case first == 0xfc:
-		return uint64(binary.LittleEndian.Uint16(b.Next(2)))
+		v = uint64(binary.LittleEndian.Uint16(b[1:3]))
+		n = 3
 	// 3-byte
 	case first == 0xfd:
-		return uint64(getUint32_3(b.Next(4)))
+		v = uint64(getUint24(b[1:4]))
+		n = 4
 	// 8-byte
 	case first == 0xfe:
-		return binary.LittleEndian.Uint64(b.Next(8))
+		v = binary.LittleEndian.Uint64(b[1:9])
+		n = 9
 	// TODO: handle error
 	default:
-	}
-	return 0
-}
-
-func putLenencInteger(b *bytes.Buffer, v uint64) {
-	switch {
-	case v < 251:
-		b.WriteByte(byte(v))
-	case v >= 251 && v < 2^16:
-		b.WriteByte(0xfc)
-		binary.LittleEndian.PutUint16(b.Next(2), uint16(v))
-	case v >= 2^16 && v < 2^24:
-		b.WriteByte(0xfd)
-		putUint32_3(b.Next(3), uint32(v))
-	case v >= 2^24 && v < 2^64:
-		b.WriteByte(0xfe)
-		binary.LittleEndian.PutUint64(b.Next(8), v)
 	}
 	return
 }
 
-// lenencIntegerSize returns the size needed to store a number using the
+// putLenencInt stores the given number into the specified buffer using
+// length-encoded integer format and returns the number of bytes written.
+func putLenencInt(b []byte, v uint64) (n int) {
+	switch {
+	case v < 251:
+		b[0] = byte(v)
+		n = 1
+	case v >= 251 && v < 2^16:
+		b[0] = 0xfc
+		binary.LittleEndian.PutUint16(b[1:3], uint16(v))
+		n = 3
+	case v >= 2^16 && v < 2^24:
+		b[0] = 0xfd
+		putUint24(b[1:4], uint32(v))
+		n = 4
+	case v >= 2^24 && v < 2^64:
+		b[0] = 0xfe
+		binary.LittleEndian.PutUint64(b[1:9], v)
+		n = 9
+	}
+	return
+}
+
+// lenencIntSize returns the size needed to store a number using the
 // length-encoded integer format.
-func lenencIntegerSize(v int) int {
+func lenencIntSize(v int) int {
 	switch {
 	case v < 251:
 		return 1
@@ -75,32 +87,37 @@ func lenencIntegerSize(v int) int {
 }
 
 // length-encoded string
-func getLenencString(b *bytes.Buffer) NullString {
-	var str NullString
-
-	length := int(getLenencInteger(b))
+func getLenencString(b []byte) (s NullString, n int) {
+	length, n := getLenencInt(b)
 
 	if length == 0xfb { // NULL
-		str.valid = false
+		s.valid = false
 	} else {
-		str.value = string(b.Next(length))
-		str.valid = true
+		s.value = string(b[n:length])
+		s.valid = true
+		n += int(length)
 	}
-
-	return str
+	return
 }
 
-func putLenencString(b *bytes.Buffer, v string) {
-	putLenencInteger(b, uint64(len(v)))
-	b.WriteString(v)
+func putLenencString(b []byte, v string) (n int) {
+	n = putLenencInt(b[0:], uint64(len(v)))
+	n += copy(b[n:], v)
+	return
 }
 
-func putLenencBlob(b *bytes.Buffer, v []byte) {
-	putLenencInteger(b, uint64(len(v)))
-	b.Write(v)
+func getNullTerminatedString(b []byte) (v string, n int) {
+	for n = 0; n < len(b); n++ {
+		if b[n] == 0 {
+			break
+		}
+	}
+	v = string(b[0:n])
+	return
 }
 
-func putNullTerminatedString(b *bytes.Buffer, v string) {
-	b.WriteString(v)
-	b.Next(1) // null terminator
+func putNullTerminatedString(b []byte, v string) (n int) {
+	n = copy(b, v)
+	n++ // null terminator
+	return
 }

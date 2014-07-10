@@ -1,7 +1,6 @@
 package mysql
 
 import (
-	"bytes"
 	"database/sql/driver"
 	"encoding/binary"
 	"math"
@@ -9,32 +8,31 @@ import (
 )
 
 // createComStmtPrepare generates the COM_STMT_PREPARE packet.
-func createComStmtPrepare(query string) (*bytes.Buffer, error) {
-	var err error
+func createComStmtPrepare(query string) []byte {
+	var (
+		off int
+	)
 
 	payloadLength := 1 + // comStmtPrepare
 		len(query) // length of query
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comStmtPrepare)
-	if _, err = b.WriteString(query); err != nil {
-		return nil, err
-	}
+	b[off] = comStmtPrepare
+	off++
 
-	return b, nil
+	off += copy(b[off:], query)
+	return b
 }
 
 // createComStmtExecute generates the COM_STMT_EXECUTE packet.
-func createComStmtExecute(s *Stmt, args []driver.Value) (*bytes.Buffer, error) {
+func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
 	var (
-		b              *bytes.Buffer
-		paramType      *bytes.Buffer
 		nullBitmap     []byte
 		nullBitmapSize int
 		paramCount     int
-		err            error
+		off            int
 	)
 
 	// TODO : assert(s.paramCount == len(args))
@@ -43,58 +41,74 @@ func createComStmtExecute(s *Stmt, args []driver.Value) (*bytes.Buffer, error) {
 	// null bitmap, size = (paramCount + 7) / 8
 	nullBitmapSize = int((paramCount + 7) / 8)
 
-	b = bytes.NewBuffer(make([]byte, packetHeaderSize+
-		comStmtExecutePayloadLength(s, args)))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+comStmtExecutePayloadLength(s, args))
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comStmtExecute)
-	binary.LittleEndian.PutUint32(b.Next(4), s.id)
-	b.WriteByte(s.flags)
-	binary.LittleEndian.PutUint32(b.Next(4), s.iterationCount)
+	b[off] = comStmtExecute
+	off++
+
+	binary.LittleEndian.PutUint32(b[off:off+4], s.id)
+	off += 4
+
+	b[off] = s.flags
+	off++
+
+	binary.LittleEndian.PutUint32(b[off:off+4], s.iterationCount)
+	off += 4
 
 	if paramCount > 0 {
-		nullBitmap = b.Next(nullBitmapSize)
+		nullBitmap = b[off : off+nullBitmapSize]
+		off += nullBitmapSize
 
-		b.WriteByte(byte(s.newParamsBoundFlag))
+		b[off] = s.newParamsBoundFlag
+		off++
 
 		if s.newParamsBoundFlag == 1 {
-			// type of each parameter
-			paramType = bytes.NewBuffer(b.Next(2 * paramCount))
+			var (
+				paramType []byte // buffer for parameter types
+				_off      int    // temp offset variable to track paramType buffer
+			)
+			paramType = b[off:] // parameter type buffer
 
 			for i := 0; i < int(s.paramCount); i++ {
 				switch v := args[i].(type) {
 				case int64:
-					binary.LittleEndian.PutUint16(paramType.Next(2),
-						uint16(mysqlTypeLongLong))
-					writeUint64(b, uint64(v))
+					binary.LittleEndian.PutUint16(paramType[_off:_off+2], uint16(mysqlTypeLongLong))
+					_off += 2
+					off += writeUint64(b, uint64(v))
 				case float64:
-					binary.LittleEndian.PutUint16(paramType.Next(2),
+					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
 						uint16(mysqlTypeDouble))
-					writeDouble(b, v)
+					off += writeDouble(b, v)
 				case bool:
-					binary.LittleEndian.PutUint16(paramType.Next(2),
+					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
 						uint16(mysqlTypeTiny))
+					_off += 2
 					value := uint8(0)
 					if v == true {
 						value = 1
 					}
-					writeUint8(b, value)
+					off += writeUint8(b, value)
 				case []byte:
-					binary.LittleEndian.PutUint16(paramType.Next(2),
+					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
 						uint16(mysqlTypeBlob))
-					writeBlob(b, v)
+					_off += 2
+					off += writeString(b, string(v))
 				case string:
-					binary.LittleEndian.PutUint16(paramType.Next(2),
+					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
 						uint16(mysqlTypeVarchar))
-					writeString(b, v)
+					_off += 2
+					off += writeString(b, v)
 				case time.Time:
-					binary.LittleEndian.PutUint16(paramType.Next(2),
+					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
 						uint16(mysqlTypeTimestamp))
-					writeDate(b, v)
+					_off += 2
+					off += writeDate(b, v)
 				case nil:
 
-					binary.LittleEndian.PutUint16(paramType.Next(2),
+					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
 						uint16(mysqlTypeNull))
+					_off += 2
 					// set the corresponding null bit
 					nullBitmap[int(i/8)] |= 1 << uint(i%8)
 				default:
@@ -104,60 +118,70 @@ func createComStmtExecute(s *Stmt, args []driver.Value) (*bytes.Buffer, error) {
 		}
 	}
 
-	return b, err
+	return b
 }
 
 // createComStmtClose generates the COM_STMT_CLOSE packet.
-func createComStmtClose(sid uint32) (*bytes.Buffer, error) {
+func createComStmtClose(sid uint32) []byte {
+	var off int
+
 	payloadLength := 5 // comStmtClose(1) + s.id(4)
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comStmtClose)
-	binary.LittleEndian.PutUint32(b.Next(4), sid)
+	b[off] = comStmtClose
+	off++
 
-	return b, nil
+	binary.LittleEndian.PutUint32(b[off:off+4], sid)
+	off += 4
+
+	return b
 }
 
 // createComStmtReset generates the COM_STMT_RESET packet.
-func createComStmtReset(s *Stmt) (*bytes.Buffer, error) {
+func createComStmtReset(s *Stmt) []byte {
+	var off int
+
 	payloadLength := 5 // comStmtReset (1) + s.id (4)
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comStmtReset)
+	b[off] = comStmtReset
+	off++
 
-	binary.LittleEndian.PutUint32(b.Next(4), s.id)
+	binary.LittleEndian.PutUint32(b[off:off+4], s.id)
+	off += 4
 
-	return b, nil
+	return b
 }
 
 // createComStmtSendLongData generates the COM_STMT_SEND_LONG_DATA packet.
-func createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) (*bytes.Buffer, error) {
+func createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) []byte {
+	var off int
+
 	payloadLength := 7 + // comStmtSendLongData(1) + s.id(4) + paramId(2)
 		len(data) // length of data
 
-	b := bytes.NewBuffer(make([]byte, packetHeaderSize+payloadLength))
-	b.Next(4) // placeholder for protocol packet header
+	b := make([]byte, packetHeaderSize+payloadLength)
+	off += 4 // placeholder for protocol packet header
 
-	b.WriteByte(comStmtSendLongData)
-	binary.LittleEndian.PutUint32(b.Next(4), s.id)
-	binary.LittleEndian.PutUint16(b.Next(2), paramId)
+	b[off] = comStmtSendLongData
+	off++
 
-	return b, nil
+	binary.LittleEndian.PutUint32(b[off:off+4], s.id)
+	off += 4
+	binary.LittleEndian.PutUint16(b[off:off+2], paramId)
+	off += 2
+
+	return b
 }
 
 // handleStmtPrepare handles COM_STMT_PREPARE and related packets
 func (c *Conn) handleStmtPrepare(query string) (s *Stmt, err error) {
-	var b *bytes.Buffer
-
 	// write COM_STMT_PREPARE packet
-	if b, err = createComStmtPrepare(query); err != nil {
-		return
-	}
-	if err = c.writePacket(b.Bytes()); err != nil {
+	if err = c.writePacket(createComStmtPrepare(query)); err != nil {
 		return
 	}
 
@@ -181,9 +205,9 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 
 	switch b[0] {
 	case okPacket: // COM_STMT_PREPARE_OK packet
-		s.parseStmtPrepareOkPacket(bytes.NewBuffer(b))
+		s.parseStmtPrepareOkPacket(b)
 	case errPacket:
-		c.parseErrPacket(bytes.NewBuffer(b))
+		c.parseErrPacket(b)
 		err = &c.e
 		return
 	}
@@ -194,7 +218,7 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 			return
 		} else {
 			s.paramDefs = append(s.paramDefs,
-				parseColumnDefinitionPacket(bytes.NewBuffer(b), false))
+				parseColumnDefinitionPacket(b, false))
 		}
 	}
 
@@ -202,7 +226,7 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 	if b, err = c.readPacket(); err != nil {
 		return
 	} else {
-		c.parseEOFPacket(bytes.NewBuffer(b))
+		c.parseEOFPacket(b)
 	}
 
 	// column definition block: read column definition packet(s)
@@ -211,7 +235,7 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 			return
 		} else {
 			s.columnDefs = append(s.columnDefs,
-				parseColumnDefinitionPacket(bytes.NewBuffer(b), false))
+				parseColumnDefinitionPacket(b, false))
 		}
 	}
 
@@ -219,35 +243,35 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 	if b, err = c.readPacket(); err != nil {
 		return
 	} else {
-		c.parseEOFPacket(bytes.NewBuffer(b))
+		c.parseEOFPacket(b)
 	}
 
 	return
 }
 
 // parseStmtPrepareOk parses COM_STMT_PREPARE_OK packet.
-func (s *Stmt) parseStmtPrepareOkPacket(b *bytes.Buffer) {
-	b.Next(1) // [00] OK
-	s.id = binary.LittleEndian.Uint32(b.Next(4))
-	s.columnCount = binary.LittleEndian.Uint16(b.Next(2))
-	s.paramCount = binary.LittleEndian.Uint16(b.Next(2))
-	b.Next(1) // reserved [00] filler
-	s.warningCount = binary.LittleEndian.Uint16(b.Next(2))
+func (s *Stmt) parseStmtPrepareOkPacket(b []byte) {
+	var off int
+
+	off++ // [00] OK
+	s.id = binary.LittleEndian.Uint32(b[off : off+4])
+	off += 4
+	s.columnCount = binary.LittleEndian.Uint16(b[off : off+2])
+	off += 2
+	s.paramCount = binary.LittleEndian.Uint16(b[off : off+2])
+	off += 2
+	off++ // reserved [00] filler
+	s.warningCount = binary.LittleEndian.Uint16(b[off : off+2])
+	off += 2
 }
 
 // handleStmtExec handles COM_STMT_EXECUTE and related packets for Stmt's
 // Exec()
 func (s *Stmt) handleStmtExec(args []driver.Value) (*Result, error) {
-	var (
-		b   *bytes.Buffer
-		err error
-	)
+	var err error
 
 	// send COM_STMT_EXECUTE to the server
-	if b, err = createComStmtExecute(s, args); err != nil {
-		return nil, err
-	}
-	if err = s.c.writePacket(b.Bytes()); err != nil {
+	if err = s.c.writePacket(createComStmtExecute(s, args)); err != nil {
 		return nil, err
 	}
 
@@ -257,16 +281,10 @@ func (s *Stmt) handleStmtExec(args []driver.Value) (*Result, error) {
 // handleStmtExecute handles COM_STMT_EXECUTE and related packets for Stmt's
 // Query()
 func (s *Stmt) handleStmtQuery(args []driver.Value) (*Rows, error) {
-	var (
-		b   *bytes.Buffer
-		err error
-	)
+	var err error
 
 	// send COM_STMT_EXECUTE to the server
-	if b, err = createComStmtExecute(s, args); err != nil {
-		return nil, err
-	}
-	if err = s.c.writePacket(b.Bytes()); err != nil {
+	if err = s.c.writePacket(createComStmtExecute(s, args)); err != nil {
 		return nil, err
 	}
 
@@ -294,10 +312,10 @@ func comStmtExecutePayloadLength(s *Stmt, args []driver.Value) (length uint64) {
 					length++
 				case []byte:
 					length +=
-						uint64(lenencIntegerSize(len(v)) + len(v))
+						uint64(lenencIntSize(len(v)) + len(v))
 				case string:
 					length +=
-						uint64(lenencIntegerSize(len(v)) + len(v))
+						uint64(lenencIntSize(len(v)) + len(v))
 				case time.Time:
 					dateSize(v)
 				case nil: // noop
@@ -322,10 +340,10 @@ func (c *Conn) handleStmtExecResponse() (*Result, error) {
 
 	switch b[0] {
 	case errPacket:
-		c.parseErrPacket(bytes.NewBuffer(b))
+		c.parseErrPacket(b)
 		return nil, &c.e
 	case okPacket:
-		c.parseOkPacket(bytes.NewBuffer(b))
+		c.parseOkPacket(b)
 		break
 	default:
 		// TODO: handle error
@@ -349,7 +367,7 @@ func (c *Conn) handleStmtQueryResponse() (*Rows, error) {
 
 	switch b[0] {
 	case errPacket:
-		c.parseErrPacket(bytes.NewBuffer(b))
+		c.parseErrPacket(b)
 		return nil, &c.e
 	default: // result set
 		return c.handleBinaryResultSet()
@@ -377,7 +395,8 @@ func (c *Conn) handleBinaryResultSet() (*Rows, error) {
 	}
 
 	// TODO: columnCount: uint16 or uint64 ??
-	rs.columnCount = uint16(getLenencInteger(bytes.NewBuffer(b)))
+	_columnCount, _ := getLenencInt(b)
+	rs.columnCount = uint16(_columnCount)
 
 	// read column definition packets
 	for i := uint16(0); i < rs.columnCount; i++ {
@@ -385,7 +404,7 @@ func (c *Conn) handleBinaryResultSet() (*Rows, error) {
 			return nil, err
 		} else {
 			rs.columnDefs = append(rs.columnDefs,
-				parseColumnDefinitionPacket(bytes.NewBuffer(b), false))
+				parseColumnDefinitionPacket(b, false))
 		}
 	}
 
@@ -393,7 +412,7 @@ func (c *Conn) handleBinaryResultSet() (*Rows, error) {
 	if b, err = c.readPacket(); err != nil {
 		return nil, err
 	} else {
-		c.parseEOFPacket(bytes.NewBuffer(b))
+		c.parseEOFPacket(b)
 	}
 
 	// read resultset row packets (each containing rs.columnCount values),
@@ -407,25 +426,32 @@ func (c *Conn) handleBinaryResultSet() (*Rows, error) {
 		case eofPacket:
 			done = true
 		case errPacket:
-			c.parseErrPacket(bytes.NewBuffer(b))
+			c.parseErrPacket(b)
 			return nil, &c.e
 		default: // result set row
 			rs.rows = append(rs.rows,
-				c.handleBinaryResultSetRow(bytes.NewBuffer(b), rs))
+				c.handleBinaryResultSetRow(b, rs))
 		}
 	}
 	return rs, nil
 }
 
-func (c *Conn) handleBinaryResultSetRow(b *bytes.Buffer, rs *Rows) *row {
+func (c *Conn) handleBinaryResultSetRow(b []byte, rs *Rows) *row {
+	var (
+		nullBitmapSize int
+		off            int
+	)
+
 	columnCount := rs.columnCount
 	r := new(row)
 	r.columns = make([]interface{}, columnCount)
 
-	b.Next(1) // packet header [00]
+	off++ // packet header [00]
 
 	// null bitmap
-	nullBitmap := b.Next(int((columnCount + 9) / 8))
+	nullBitmapSize = int((columnCount + 9) / 8)
+	nullBitmap := b[off : off+nullBitmapSize]
+	off += nullBitmapSize
 
 	for i := uint16(0); i < columnCount; i++ {
 		if isNull(nullBitmap, i) == true {
@@ -440,40 +466,52 @@ func (c *Conn) handleBinaryResultSetRow(b *bytes.Buffer, rs *Rows) *row {
 				mysqlTypeLongBlob, mysqlTypeGeometry,
 				mysqlTypeBit, mysqlTypeDecimal,
 				mysqlTypeNewDecimal:
-				r.columns = append(r.columns, parseString(b))
+				v, n := parseString(b[off:])
+				r.columns = append(r.columns, v)
+				off += n
 
 			// uint64
 			case mysqlTypeLongLong:
-				r.columns = append(r.columns, parseUint64(b))
+				r.columns = append(r.columns, parseUint64(b[off:off+8]))
+				off += 8
 
 			// uint32
 			case mysqlTypeLong, mysqlTypeInt24:
-				r.columns = append(r.columns, parseUint32(b))
+				r.columns = append(r.columns, parseUint32(b[off:off+4]))
+				off += 4
 
 			// uint16
 			case mysqlTypeShort, mysqlTypeYear:
-				r.columns = append(r.columns, parseUint16(b))
+				r.columns = append(r.columns, parseUint16(b[off:off+2]))
+				off += 2
 
 			// uint8
 			case mysqlTypeTiny:
-				r.columns = append(r.columns, parseUint8(b))
+				r.columns = append(r.columns, parseUint8(b[off:off+1]))
+				off++
 
 			// float64
 			case mysqlTypeDouble:
-				r.columns = append(r.columns, parseDouble(b))
+				r.columns = append(r.columns, parseDouble(b[off:off+8]))
+				off += 8
 
 			// float32
 			case mysqlTypeFloat:
-				r.columns = append(r.columns, parseFloat(b))
+				r.columns = append(r.columns, parseFloat(b[off:off+4]))
+				off += 4
 
 			// time.Time
 			case mysqlTypeDate, mysqlTypeDateTime,
 				mysqlTypeTimestamp:
-				r.columns = append(r.columns, parseDate(b))
+				v, n := parseDate(b[off:])
+				r.columns = append(r.columns, v)
+				off += n
 
 			// time.Duration
 			case mysqlTypeTime:
-				r.columns = append(r.columns, parseTime(b))
+				v, n := parseTime(b[off:])
+				r.columns = append(r.columns, v)
+				off += n
 
 			// TODO: map the following unhandled types accordingly
 			case mysqlTypeNewDate, mysqlTypeTimeStamp2,
@@ -571,134 +609,153 @@ const (
   MYSQL_TYPE_GEOMETRY
 */
 
-func parseString(b *bytes.Buffer) string {
-	return getLenencString(b).value
+func parseString(b []byte) (s string, n int) {
+	var _s NullString
+	_s, n = getLenencString(b)
+	return _s.value, n
 }
 
-func parseUint64(b *bytes.Buffer) uint64 {
-	return binary.LittleEndian.Uint64(b.Next(8))
+func parseUint64(b []byte) uint64 {
+	return binary.LittleEndian.Uint64(b[:8])
 }
 
-func parseUint32(b *bytes.Buffer) uint32 {
-	return binary.LittleEndian.Uint32(b.Next(4))
+func parseUint32(b []byte) uint32 {
+	return binary.LittleEndian.Uint32(b[:4])
 }
 
-func parseUint16(b *bytes.Buffer) uint16 {
-	return binary.LittleEndian.Uint16(b.Next(2))
+func parseUint16(b []byte) uint16 {
+	return binary.LittleEndian.Uint16(b[:2])
 }
 
-func parseUint8(b *bytes.Buffer) uint8 {
-	return uint8(b.Next(1)[0])
+func parseUint8(b []byte) uint8 {
+	return uint8(b[0])
 }
 
-func parseDouble(b *bytes.Buffer) float64 {
-	return math.Float64frombits(binary.LittleEndian.Uint64(b.Next(8)))
+func parseDouble(b []byte) float64 {
+	return math.Float64frombits(binary.LittleEndian.Uint64(b[:8]))
 }
 
-func parseFloat(b *bytes.Buffer) float32 {
-	return math.Float32frombits(binary.LittleEndian.Uint32(b.Next(4)))
+func parseFloat(b []byte) float32 {
+	return math.Float32frombits(binary.LittleEndian.Uint32(b[:4]))
 }
 
 // TODO: fix location
-func parseDate(b *bytes.Buffer) time.Time {
+func parseDate(b []byte) (time.Time, int) {
 	var (
 		year, day, hour, min, sec, msec int
 		month                           time.Month
 		loc                             *time.Location = time.UTC
+		off                             int
 	)
 
-	len := b.Next(1)[0]
+	len := b[off]
+	off++
 
 	if len >= 4 {
-		year = int(binary.LittleEndian.Uint16(b.Next(2)))
-		month = time.Month(b.Next(1)[0])
-		day = int(b.Next(1)[0])
+		year = int(binary.LittleEndian.Uint16(b[off : off+2]))
+		off += 2
+		month = time.Month(b[off])
+		off++
+		day = int(b[off])
+		off++
 	}
 
 	if len >= 7 {
-		hour = int(b.Next(1)[0])
-		min = int(b.Next(1)[0])
-		sec = int(b.Next(1)[0])
+		hour = int(b[off])
+		off++
+		min = int(b[off])
+		off++
+		sec = int(b[off])
+		off++
 	}
 
 	if len == 11 {
-		msec = int(binary.LittleEndian.Uint32(b.Next(4)))
+		msec = int(binary.LittleEndian.Uint32(b[off : off+4]))
+		off += 4
 	}
 
-	return time.Date(year, month, day, hour, min, sec, msec*1000, loc)
+	return time.Date(year, month, day, hour, min, sec, msec*1000, loc), off
 }
 
-func parseTime(b *bytes.Buffer) time.Duration {
+func parseTime(b []byte) (time.Duration, int) {
 	var (
 		duration time.Duration
 		neg      int // multiplier
+		off      int
 	)
 
-	len := b.Next(1)[0]
+	len := b[off]
+	off++
 
 	if len >= 8 {
-		if b.Next(1)[0] == 1 {
+		if b[off] == 1 {
 			neg = -1
 		} else {
 			neg = 1
 		}
+		off++
 
-		duration += time.Duration(binary.LittleEndian.Uint32(b.Next(4))) *
+		duration += time.Duration(binary.LittleEndian.Uint32(b[off:off+4])) *
 			24 * time.Hour
-		duration += time.Duration(b.Next(1)[0]) * time.Hour
-		duration += time.Duration(b.Next(1)[0]) * time.Minute
-		duration += time.Duration(b.Next(1)[0]) * time.Second
+		off += 4
+		duration += time.Duration(b[off]) * time.Hour
+		off++
+		duration += time.Duration(b[off]) * time.Minute
+		off++
+		duration += time.Duration(b[off]) * time.Second
+		off++
 	}
 
 	if len == 12 {
-		duration += time.Duration(binary.LittleEndian.Uint32(b.Next(4))) *
-			time.Microsecond
+		duration +=
+			time.Duration(binary.LittleEndian.Uint32(b[off:off+4])) *
+				time.Microsecond
 	}
 
-	return time.Duration(neg) * duration
+	return time.Duration(neg) * duration, off
 }
 
-func parseNull() {
+func writeString(b []byte, v string) (n int) {
+	return putLenencString(b, v)
 }
 
-func writeString(b *bytes.Buffer, v string) {
-	putLenencString(b, v)
+func writeUint64(b []byte, v uint64) (n int) {
+	binary.LittleEndian.PutUint64(b[:8], v)
+	return 8
 }
 
-func writeBlob(b *bytes.Buffer, v []byte) {
-	putLenencBlob(b, v)
+func writeUint32(b []byte, v uint32) (n int) {
+	binary.LittleEndian.PutUint32(b[:4], v)
+	return 4
 }
 
-func writeUint64(b *bytes.Buffer, v uint64) {
-	binary.LittleEndian.PutUint64(b.Next(8), v)
+func writeUint16(b []byte, v uint16) (n int) {
+	binary.LittleEndian.PutUint16(b[:2], v)
+	return 2
 }
 
-func writeUint32(b *bytes.Buffer, v uint32) {
-	binary.LittleEndian.PutUint32(b.Next(4), v)
+func writeUint8(b []byte, v uint8) (n int) {
+	b[0] = uint8(v)
+	return 1
 }
 
-func writeUint16(b *bytes.Buffer, v uint16) {
-	binary.LittleEndian.PutUint16(b.Next(2), v)
+func writeDouble(b []byte, v float64) (n int) {
+	binary.LittleEndian.PutUint64(b[:8], math.Float64bits(v))
+	return 8
 }
 
-func writeUint8(b *bytes.Buffer, v uint8) {
-	b.WriteByte(v)
-}
-
-func writeDouble(b *bytes.Buffer, v float64) {
-	binary.LittleEndian.PutUint64(b.Next(8), math.Float64bits(v))
-}
-
-func writeFloat(b *bytes.Buffer, v float32) {
-	binary.LittleEndian.PutUint32(b.Next(4), math.Float32bits(v))
+func writeFloat(b []byte, v float32) (n int) {
+	binary.LittleEndian.PutUint32(b[:4], math.Float32bits(v))
+	return 4
 }
 
 // TODO: Handle 0 date
-func writeDate(b *bytes.Buffer, v time.Time) {
+func writeDate(b []byte, v time.Time) int {
 	var (
 		length, month, day, hour, min, sec uint8
 		year                               uint16
 		msec                               uint32
+		off                                int
 	)
 
 	year = uint16(v.Year())
@@ -711,7 +768,7 @@ func writeDate(b *bytes.Buffer, v time.Time) {
 
 	if hour == 0 && min == 0 && sec == 0 && msec == 0 {
 		if year == 0 && month == 0 && day == 0 {
-			return
+			return 0
 		} else {
 			length = 4
 		}
@@ -721,25 +778,33 @@ func writeDate(b *bytes.Buffer, v time.Time) {
 		length = 11
 	}
 
-	b.WriteByte(length)
+	b[off] = length
+	off++
 
 	if length >= 4 {
-		binary.LittleEndian.PutUint16(b.Next(2), year)
-		b.WriteByte(month)
-		b.WriteByte(day)
+		binary.LittleEndian.PutUint16(b[off:off+2], year)
+		off += 2
+		b[off] = month
+		off++
+		b[off] = day
+		off++
 	}
 
 	if length >= 7 {
-		b.WriteByte(hour)
-		b.WriteByte(min)
-		b.WriteByte(sec)
+		b[off] = hour
+		off++
+		b[off] = min
+		off++
+		b[off] = sec
+		off++
 	}
 
 	if length == 11 {
-		binary.LittleEndian.PutUint32(b.Next(4), msec)
+		binary.LittleEndian.PutUint32(b[off:off+4], msec)
+		off += 4
 	}
 
-	return
+	return off
 }
 
 // dateSize returns the size needed to store a given time.Time.
@@ -773,10 +838,11 @@ func dateSize(v time.Time) (length int) {
 	return
 }
 
-func writeTime(b *bytes.Buffer, v time.Duration) {
+func writeTime(b []byte, v time.Duration) int {
 	var (
 		length, neg, hours, mins, secs uint8
 		days, msecs                    uint32
+		off                            int
 	)
 
 	if v < 0 {
@@ -798,7 +864,7 @@ func writeTime(b *bytes.Buffer, v time.Duration) {
 	msecs = uint32(v / time.Microsecond)
 
 	if days == 0 && hours == 0 && mins == 0 && secs == 0 && msecs == 0 {
-		return
+		return 0
 	}
 
 	if msecs == 0 {
@@ -807,32 +873,34 @@ func writeTime(b *bytes.Buffer, v time.Duration) {
 		length = 12
 	}
 
-	b.WriteByte(length)
-	b.WriteByte(neg)
+	b[off] = length
+	off++
+	b[off] = neg
+	off++
 
 	if length >= 8 {
-		binary.LittleEndian.PutUint32(b.Next(4), days)
-		b.WriteByte(hours)
-		b.WriteByte(mins)
-		b.WriteByte(secs)
+		binary.LittleEndian.PutUint32(b[off:off+4], days)
+		off += 4
+		b[off] = hours
+		off++
+		b[off] = mins
+		off++
+		b[off] = secs
+		off++
 	}
 
 	if length == 12 {
-		binary.LittleEndian.PutUint32(b.Next(4), msecs)
+		binary.LittleEndian.PutUint32(b[off:off+4], msecs)
+		off += 4
 	}
-	return
+	return off
 }
 
 // handleStmtClose handles COM_STMT_CLOSE and related packets
-func (s *Stmt) handleStmtClose() (err error) {
-	var b *bytes.Buffer
-
+func (s *Stmt) handleStmtClose() error {
 	// write COM_STMT_CLOSE packet
-	if b, err = createComStmtClose(s.id); err != nil {
-		return
-	}
-	if err = s.c.writePacket(b.Bytes()); err != nil {
-		return
+	if err := s.c.writePacket(createComStmtClose(s.id)); err != nil {
+		return err
 	}
 
 	// note: expect no response from the server
