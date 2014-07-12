@@ -93,7 +93,7 @@ func getLenencString(b []byte) (s NullString, n int) {
 	if length == 0xfb { // NULL
 		s.valid = false
 	} else {
-		s.value = string(b[n:length])
+		s.value = string(b[n : n+int(length)])
 		s.valid = true
 		n += int(length)
 	}

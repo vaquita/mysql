@@ -89,7 +89,7 @@ const (
 		clientLongFlag |
 		clientTransactions |
 		clientProtocol41 |
-		clientSecureConnection |
+		//clientSecureConnection |
 		clientMultiResults |
 		clientPluginAuth)
 )
@@ -151,8 +151,8 @@ func (c *Conn) writePacket(b []byte) error {
 	var err error
 
 	// populate the packet header
-	putUint24(b[0:3], uint32(len(b))) // payload length
-	b[3] = c.sequenceId               // packet sequence ID
+	putUint24(b[0:3], uint32(len(b)-4)) // payload length
+	b[3] = c.sequenceId                 // packet sequence ID
 
 	// write it to the network
 	if _, err = c.n.write(b); err != nil {
@@ -611,18 +611,23 @@ func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, err
 		_args  []interface{}
 	)
 
-	// TODO: find a better way to perform the []driver.Value ->
-	// []interface{} conversion
-	_args = make([]interface{}, len(args))
-	for i := 0; i < len(args); i++ {
-		switch v := args[i].(type) {
-		default:
-			_args[i] = v
-		}
-	}
+	// reset the protocol packet sequence number
+	c.sequenceId = 0
 
-	// TODO: prepare query from the give args
-	fmt.Sprintf(_query, _args...)
+	if len(args) > 0 {
+		// TODO: find a better way to perform the []driver.Value ->
+		// []interface{} conversion
+		_args = make([]interface{}, len(args))
+		for i := 0; i < len(args); i++ {
+			switch v := args[i].(type) {
+			default:
+				_args[i] = v
+			}
+		}
+		_query = fmt.Sprintf(query, _args...)
+	} else {
+		_query = query
+	}
 
 	// send COM_QUERY to the server
 	if err = c.writePacket(createComQuery(_query)); err != nil {
@@ -640,17 +645,23 @@ func (c *Conn) handleQuery(query string, args []driver.Value) (driver.Rows, erro
 		_args  []interface{}
 	)
 
-	// TODO: find a better way to perform the []driver.Value ->
-	// []interface{} conversion
-	_args = make([]interface{}, len(args))
-	for i := 0; i < len(args); i++ {
-		switch v := args[i].(type) {
-		default:
-			_args[i] = v
-		}
-	}
+	// reset the protocol packet sequence number
+	c.sequenceId = 0
 
-	fmt.Sprintf(_query, _args...)
+	if len(args) > 0 {
+		// TODO: find a better way to perform the []driver.Value ->
+		// []interface{} conversion
+		_args = make([]interface{}, len(args))
+		for i := 0; i < len(args); i++ {
+			switch v := args[i].(type) {
+			default:
+				_args[i] = v
+			}
+		}
+		_query = fmt.Sprintf(query, _args...)
+	} else {
+		_query = query
+	}
 
 	// send COM_QUERY to the server
 	if err = c.writePacket(createComQuery(_query)); err != nil {
@@ -704,14 +715,16 @@ func (c *Conn) handleQueryResponse() (*Rows, error) {
 	case localInfileRequestPacket: // local infile request
 		// TODO: add support for local infile request
 	default: // result set
-		return c.handleResultSet()
+		// get the column count (TODO: columnCount: uint16 or uint64 // ??)
+		columnCount, _ := getLenencInt(b)
+		return c.handleResultSet(uint16(columnCount))
 	}
 
 	// control shouldn't reach here
 	return nil, nil
 }
 
-func (c *Conn) handleResultSet() (*Rows, error) {
+func (c *Conn) handleResultSet(columnCount uint16) (*Rows, error) {
 	var (
 		err  error
 		b    []byte
@@ -721,16 +734,7 @@ func (c *Conn) handleResultSet() (*Rows, error) {
 	rs := new(Rows)
 	rs.columnDefs = make([]*columnDefinition, 0)
 	rs.rows = make([]*row, 0)
-
-	// read the packet containing the column count (stored in length-encoded
-	// integer)
-	if b, err = c.readPacket(); err != nil {
-		return nil, err
-	}
-
-	// TODO: columnCount: uint16 or uint64 ??
-	_columnCount, _ := getLenencInt(b)
-	rs.columnCount = uint16(_columnCount)
+	rs.columnCount = columnCount
 
 	// read column definition packets
 	for i := uint16(0); i < rs.columnCount; i++ {
@@ -776,10 +780,11 @@ func (c *Conn) handleResultSetRow(b []byte, rs *Rows) *row {
 		off, n int
 	)
 
+	columnCount := rs.columnCount
 	r := new(row)
-	r.columns = make([]interface{}, 0)
+	r.columns = make([]interface{}, 0, columnCount)
 
-	for i := uint16(0); i < rs.columnCount; i++ {
+	for i := uint16(0); i < columnCount; i++ {
 		v, n = getLenencString(b[off:])
 		if v.valid == true {
 			r.columns = append(r.columns, v.value)
@@ -791,6 +796,9 @@ func (c *Conn) handleResultSetRow(b []byte, rs *Rows) *row {
 	return r
 }
 
-func (c *Conn) handleComQuit() error {
+func (c *Conn) handleQuit() error {
+	// reset the protocol packet sequence number
+	c.sequenceId = 0
+
 	return c.writePacket(createComQuit())
 }

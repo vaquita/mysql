@@ -64,51 +64,49 @@ func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
 		off++
 
 		if s.newParamsBoundFlag == 1 {
-			var (
-				paramType []byte // buffer for parameter types
-				_off      int    // temp offset variable to track paramType buffer
-			)
-			paramType = b[off:] // parameter type buffer
+			poff := off // offset to keep track of parameter types
+			off += (2 * int(s.paramCount))
 
 			for i := 0; i < int(s.paramCount); i++ {
 				switch v := args[i].(type) {
 				case int64:
-					binary.LittleEndian.PutUint16(paramType[_off:_off+2], uint16(mysqlTypeLongLong))
-					_off += 2
-					off += writeUint64(b, uint64(v))
+					binary.LittleEndian.PutUint16(b[poff:poff+2], uint16(mysqlTypeLongLong))
+					poff += 2
+					off += writeUint64(b[off:], uint64(v))
 				case float64:
-					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
+					binary.LittleEndian.PutUint16(b[poff:poff+2],
 						uint16(mysqlTypeDouble))
-					off += writeDouble(b, v)
+					poff += 2
+					off += writeDouble(b[off:], v)
 				case bool:
-					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
+					binary.LittleEndian.PutUint16(b[poff:poff+2],
 						uint16(mysqlTypeTiny))
-					_off += 2
+					poff += 2
 					value := uint8(0)
 					if v == true {
 						value = 1
 					}
-					off += writeUint8(b, value)
+					off += writeUint8(b[off:], value)
 				case []byte:
-					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
+					binary.LittleEndian.PutUint16(b[poff:poff+2],
 						uint16(mysqlTypeBlob))
-					_off += 2
-					off += writeString(b, string(v))
+					poff += 2
+					off += writeString(b[off:], string(v))
 				case string:
-					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
+					binary.LittleEndian.PutUint16(b[poff:poff+2],
 						uint16(mysqlTypeVarchar))
-					_off += 2
-					off += writeString(b, v)
+					poff += 2
+					off += writeString(b[off:], v)
 				case time.Time:
-					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
+					binary.LittleEndian.PutUint16(b[poff:poff+2],
 						uint16(mysqlTypeTimestamp))
-					_off += 2
-					off += writeDate(b, v)
+					poff += 2
+					off += writeDate(b[off:], v)
 				case nil:
 
-					binary.LittleEndian.PutUint16(paramType[_off:_off+2],
+					binary.LittleEndian.PutUint16(b[poff:poff+2],
 						uint16(mysqlTypeNull))
-					_off += 2
+					poff += 2
 					// set the corresponding null bit
 					nullBitmap[int(i/8)] |= 1 << uint(i%8)
 				default:
@@ -180,6 +178,9 @@ func createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) []byte {
 
 // handleStmtPrepare handles COM_STMT_PREPARE and related packets
 func (c *Conn) handleStmtPrepare(query string) (s *Stmt, err error) {
+	// reset the protocol packet sequence number
+	c.sequenceId = 0
+
 	// write COM_STMT_PREPARE packet
 	if err = c.writePacket(createComStmtPrepare(query)); err != nil {
 		return
@@ -265,30 +266,37 @@ func (s *Stmt) parseStmtPrepareOkPacket(b []byte) {
 	off += 2
 }
 
-// handleStmtExec handles COM_STMT_EXECUTE and related packets for Stmt's
-// Exec()
-func (s *Stmt) handleStmtExec(args []driver.Value) (*Result, error) {
+// handleExec handles COM_STMT_EXECUTE and related packets for Stmt's Exec()
+func (s *Stmt) handleExec(args []driver.Value) (*Result, error) {
 	var err error
+
+	// reset the protocol packet sequence number
+	s.c.sequenceId = 0
 
 	// send COM_STMT_EXECUTE to the server
 	if err = s.c.writePacket(createComStmtExecute(s, args)); err != nil {
 		return nil, err
 	}
 
-	return s.c.handleStmtExecResponse()
+	return s.handleExecResponse()
 }
 
-// handleStmtExecute handles COM_STMT_EXECUTE and related packets for Stmt's
-// Query()
-func (s *Stmt) handleStmtQuery(args []driver.Value) (*Rows, error) {
+// handleExecute handles COM_STMT_EXECUTE and related packets for Stmt's Query()
+func (s *Stmt) handleQuery(args []driver.Value) (*Rows, error) {
 	var err error
+
+	// reset the protocol packet sequence number
+	s.c.sequenceId = 0
+
+	// TODO: set me appropriately
+	s.newParamsBoundFlag = 1
 
 	// send COM_STMT_EXECUTE to the server
 	if err = s.c.writePacket(createComStmtExecute(s, args)); err != nil {
 		return nil, err
 	}
 
-	return s.c.handleStmtQueryResponse()
+	return s.handleQueryResponse()
 }
 
 // comStmtExecutePayloadLength returns the payload size of COM_STMT_EXECUTE
@@ -328,11 +336,13 @@ func comStmtExecutePayloadLength(s *Stmt, args []driver.Value) (length uint64) {
 	return
 }
 
-func (c *Conn) handleStmtExecResponse() (*Result, error) {
+func (s *Stmt) handleExecResponse() (*Result, error) {
 	var (
 		err error
 		b   []byte
 	)
+
+	c := s.c
 
 	if b, err = c.readPacket(); err != nil {
 		return nil, err
@@ -355,11 +365,13 @@ func (c *Conn) handleStmtExecResponse() (*Result, error) {
 	return res, nil
 }
 
-func (c *Conn) handleStmtQueryResponse() (*Rows, error) {
+func (s *Stmt) handleQueryResponse() (*Rows, error) {
 	var (
 		err error
 		b   []byte
 	)
+
+	c := s.c
 
 	if b, err = c.readPacket(); err != nil {
 		return nil, err
@@ -370,14 +382,16 @@ func (c *Conn) handleStmtQueryResponse() (*Rows, error) {
 		c.parseErrPacket(b)
 		return nil, &c.e
 	default: // result set
-		return c.handleBinaryResultSet()
+		// get the column count (TODO: columnCount: uint16 or uint64 // ??)
+		columnCount, _ := getLenencInt(b)
+		return c.handleBinaryResultSet(uint16(columnCount))
 	}
 
 	// control shouldn't reach here
 	return nil, nil
 }
 
-func (c *Conn) handleBinaryResultSet() (*Rows, error) {
+func (c *Conn) handleBinaryResultSet(columnCount uint16) (*Rows, error) {
 	var (
 		err  error
 		b    []byte
@@ -387,16 +401,7 @@ func (c *Conn) handleBinaryResultSet() (*Rows, error) {
 	rs := new(Rows)
 	rs.columnDefs = make([]*columnDefinition, 0)
 	rs.rows = make([]*row, 0)
-
-	// read the packet containing the column count (stored in length-encoded
-	// integer)
-	if b, err = c.readPacket(); err != nil {
-		return nil, err
-	}
-
-	// TODO: columnCount: uint16 or uint64 ??
-	_columnCount, _ := getLenencInt(b)
-	rs.columnCount = uint16(_columnCount)
+	rs.columnCount = columnCount
 
 	// read column definition packets
 	for i := uint16(0); i < rs.columnCount; i++ {
@@ -444,7 +449,7 @@ func (c *Conn) handleBinaryResultSetRow(b []byte, rs *Rows) *row {
 
 	columnCount := rs.columnCount
 	r := new(row)
-	r.columns = make([]interface{}, columnCount)
+	r.columns = make([]interface{}, 0, columnCount)
 
 	off++ // packet header [00]
 
@@ -896,8 +901,11 @@ func writeTime(b []byte, v time.Duration) int {
 	return off
 }
 
-// handleStmtClose handles COM_STMT_CLOSE and related packets
-func (s *Stmt) handleStmtClose() error {
+// handleClose handles COM_STMT_CLOSE and related packets
+func (s *Stmt) handleClose() error {
+	// reset the protocol packet sequence number
+	s.c.sequenceId = 0
+
 	// write COM_STMT_CLOSE packet
 	if err := s.c.writePacket(createComStmtClose(s.id)); err != nil {
 		return err

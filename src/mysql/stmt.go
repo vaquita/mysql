@@ -26,7 +26,7 @@ type Stmt struct {
 }
 
 func (s *Stmt) Close() error {
-	return s.handleStmtClose()
+	return s.handleClose()
 }
 
 func (s *Stmt) NumInput() int {
@@ -34,9 +34,9 @@ func (s *Stmt) NumInput() int {
 }
 
 func (s *Stmt) Exec(args []driver.Value) (driver.Result, error) {
-	return s.handleStmtExec(args)
+	return s.handleExec(args)
 }
 
 func (s *Stmt) Query(args []driver.Value) (driver.Rows, error) {
-	return s.handleStmtQuery(args)
+	return s.handleQuery(args)
 }
