@@ -42,7 +42,11 @@ func (c *Conn) Close() error {
 }
 
 func (c *Conn) Begin() (driver.Tx, error) {
-	tx := &Tx{}
+	if _, err := c.handleExec("START TRANSACTION", nil); err != nil {
+		return nil, err
+	}
+	tx := new(Tx)
+	tx.c = c
 	return tx, nil
 }
 
