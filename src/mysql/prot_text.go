@@ -323,16 +323,14 @@ func (c *Conn) createHandshakeResponsePacket() []byte {
 
 	off += putNullTerminatedString(b[off:], c.p.username)
 
-	if authLength > 0 {
-		if (c.serverCapabilityFlags & clientPluginAuthLenencClientData) != 0 {
-			off += putLenencString(b[off:], string(authData))
-		} else if (c.serverCapabilityFlags & clientSecureConnection) != 0 {
-			b[off] = byte(authLength)
-			off++
-			off += copy(b[off:], authData)
-		} else {
-			off += putNullTerminatedString(b[off:], string(authData))
-		}
+	if (c.serverCapabilityFlags & clientPluginAuthLenencClientData) != 0 {
+		off += putLenencString(b[off:], string(authData))
+	} else if (c.serverCapabilityFlags & clientSecureConnection) != 0 {
+		b[off] = byte(authLength)
+		off++
+		off += copy(b[off:], authData)
+	} else {
+		off += putNullTerminatedString(b[off:], string(authData))
 	}
 
 	if (c.serverCapabilityFlags & clientConnectWithDb) != 0 {
