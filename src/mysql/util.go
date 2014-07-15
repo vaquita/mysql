@@ -107,12 +107,15 @@ func putLenencString(b []byte, v string) (n int) {
 }
 
 func getNullTerminatedString(b []byte) (v string, n int) {
-	for n = 0; n < len(b); n++ {
-		if b[n] == 0 {
+	for {
+		if n > len(b) || b[n] == 0 {
 			break
+		} else {
+			n++
 		}
 	}
 	v = string(b[0:n])
+	n++
 	return
 }
 

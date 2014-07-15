@@ -89,7 +89,7 @@ const (
 		clientLongFlag |
 		clientTransactions |
 		clientProtocol41 |
-		//clientSecureConnection |
+		clientSecureConnection |
 		clientMultiResults |
 		clientPluginAuth)
 )
@@ -253,7 +253,7 @@ func (c *Conn) parseGreetingPacket(b []byte) {
 		c.statusFlags = binary.LittleEndian.Uint16(b[off : off+2]) // status flags
 		off += 2
 		// capacity flags (upper 2 bytes)
-		c.serverCapabilityFlags = uint32(binary.LittleEndian.Uint16(b[off:off+2]) << 2)
+		c.serverCapabilityFlags |= (uint32(binary.LittleEndian.Uint16(b[off:off+2])) << 16)
 		off += 2
 
 		if (c.serverCapabilityFlags & clientPluginAuth) != 0 {
@@ -272,6 +272,7 @@ func (c *Conn) parseGreetingPacket(b []byte) {
 			if (authDataLength - 8) > 13 {
 				authDataLength = 13 + 8
 			}
+			authDataLength-- // ignore the 13th 0x00 byte
 			authDataOff_2 = off
 			off += (authDataLength - 8)
 		}
@@ -324,7 +325,7 @@ func (c *Conn) createHandshakeResponsePacket() []byte {
 
 	if authLength > 0 {
 		if (c.serverCapabilityFlags & clientPluginAuthLenencClientData) != 0 {
-			off += putLenencString(b, string(authData))
+			off += putLenencString(b[off:], string(authData))
 		} else if (c.serverCapabilityFlags & clientSecureConnection) != 0 {
 			b[off] = byte(authLength)
 			off++
