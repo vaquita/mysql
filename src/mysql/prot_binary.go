@@ -530,13 +530,13 @@ func (c *Conn) handleBinaryResultSetRow(b []byte, rs *Rows) *row {
 	return r
 }
 
-// isNull returns whether the column at position identified by columnPosition
-// is NULL. columnPosition is the column's position starting with 0.
-func isNull(nullBitmap []byte, columnPosition uint16) bool {
-	// for binary protocol result set row offset = 2
-	columnPosition += 2
+// isNull returns whether the column at the given position is NULL; the first
+// column's position is 0.
+func isNull(bitmap []byte, pos uint16) bool {
+	// for binary protocol, result set row offset = 2
+	pos += 2
 
-	if (nullBitmap[columnPosition/8] & (1 << (columnPosition % 8))) == 1 {
+	if (bitmap[pos/8] & (1 << (pos % 8))) != 0 {
 		return true // null
 	}
 	return false // not null

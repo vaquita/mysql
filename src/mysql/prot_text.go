@@ -87,6 +87,7 @@ const (
 const (
 	clientCapabilityFlags = (clientLongPassword |
 		clientLongFlag |
+		clientConnectWithDb |
 		clientTransactions |
 		clientProtocol41 |
 		clientSecureConnection |
@@ -272,9 +273,9 @@ func (c *Conn) parseGreetingPacket(b []byte) {
 			if (authDataLength - 8) > 13 {
 				authDataLength = 13 + 8
 			}
-			authDataLength-- // ignore the 13th 0x00 byte
 			authDataOff_2 = off
 			off += (authDataLength - 8)
+			authDataLength-- // ignore the 13th 0x00 byte
 		}
 		authData = make([]byte, authDataLength)
 		copy(authData[0:8], b[authDataOff_1:authDataOff_1+8])
