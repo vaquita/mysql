@@ -12,11 +12,6 @@ import (
 	"time"
 )
 
-// protocol packet header size
-const (
-	packetHeaderSize = 4
-)
-
 // server commands
 const (
 	comSleep = iota
@@ -127,7 +122,7 @@ func (c *Conn) readPacket() ([]byte, error) {
 	var err error
 
 	// first read the packet header
-	hBuf := make([]byte, packetHeaderSize)
+	hBuf := make([]byte, 4)
 	if _, err = c.n.read(hBuf); err != nil {
 		return nil, err
 	}
@@ -309,7 +304,7 @@ func (c *Conn) createHandshakeResponsePacket() []byte {
 	authData = c.authResponseData()
 	authLength = len(authData)
 
-	b := make([]byte, packetHeaderSize+
+	b := make([]byte, 4+
 		c.handshakeResponsePayloadLength(authLength))
 	off += 4 // placeholder for protocol packet header
 
@@ -382,7 +377,7 @@ func createComQuit() (b []byte) {
 	var off int
 	payloadLength := 1 // comQuit
 
-	b = make([]byte, packetHeaderSize+payloadLength)
+	b = make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 	b[off] = comQuit
 	return
@@ -395,7 +390,7 @@ func createComInitDb(schema string) []byte {
 	payloadLength := 1 + // comInitDb
 		len(schema) // length of schema name
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comInitDb
@@ -412,7 +407,7 @@ func createComQuery(query string) []byte {
 	payloadLength := 1 + // comQuery
 		len(query) // length of query
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comQuery
@@ -431,7 +426,7 @@ func createComFieldList(table, fieldWildcard string) []byte {
 		1 + // NULL
 		len(fieldWildcard) // length of field wildcard
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comFieldList
@@ -452,7 +447,7 @@ func createComCreateDb(schema string) []byte {
 	payloadLength := 1 + // comCreateDb
 		len(schema) // length of schema name
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comCreateDb
@@ -469,7 +464,7 @@ func createComDropDb(schema string) []byte {
 	payloadLength := 1 + // comDropDb
 		len(schema) // length of schema name
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comDropDb
@@ -499,7 +494,7 @@ func createComRefresh(subCommand uint8) []byte {
 	payloadLength := 1 + // comRefresh
 		1 // subCommand length
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comRefresh
@@ -529,7 +524,7 @@ func createComShutdown(level MyShutdownLevel) []byte {
 	payloadLength := 1 + // comShutdown
 		1 // shutdown level length
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comShutdown
@@ -545,7 +540,7 @@ func createComStatistics() []byte {
 
 	payloadLength := 1 // comStatistics
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comStatistics
@@ -560,7 +555,7 @@ func createComProcessInfo() []byte {
 
 	payloadLength := 1 // comProcessInfo
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comProcessInfo
@@ -915,7 +910,7 @@ func createInfileDataPacket(filename string) ([]byte, error) {
 		return nil, err
 	}
 
-	b := make([]byte, packetHeaderSize+fi.Size())
+	b := make([]byte, 4+fi.Size())
 
 	if _, err = f.Read(b[4:]); err != nil {
 		return nil, err
@@ -926,5 +921,5 @@ func createInfileDataPacket(filename string) ([]byte, error) {
 
 // createEmptyPacket generates an empty packet.
 func createEmptyPacket() []byte {
-	return make([]byte, packetHeaderSize)
+	return make([]byte, 4)
 }

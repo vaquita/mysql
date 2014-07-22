@@ -16,7 +16,7 @@ func createComStmtPrepare(query string) []byte {
 	payloadLength := 1 + // comStmtPrepare
 		len(query) // length of query
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comStmtPrepare
@@ -41,7 +41,7 @@ func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
 	// null bitmap, size = (paramCount + 7) / 8
 	nullBitmapSize = int((paramCount + 7) / 8)
 
-	b := make([]byte, packetHeaderSize+comStmtExecutePayloadLength(s, args))
+	b := make([]byte, 4+comStmtExecutePayloadLength(s, args))
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comStmtExecute
@@ -125,7 +125,7 @@ func createComStmtClose(sid uint32) []byte {
 
 	payloadLength := 5 // comStmtClose(1) + s.id(4)
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comStmtClose
@@ -143,7 +143,7 @@ func createComStmtReset(s *Stmt) []byte {
 
 	payloadLength := 5 // comStmtReset (1) + s.id (4)
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comStmtReset
@@ -162,7 +162,7 @@ func createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) []byte {
 	payloadLength := 7 + // comStmtSendLongData(1) + s.id(4) + paramId(2)
 		len(data) // length of data
 
-	b := make([]byte, packetHeaderSize+payloadLength)
+	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = comStmtSendLongData
