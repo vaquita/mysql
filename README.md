@@ -55,6 +55,8 @@ Go driver for MariaDB/MySQL server
 
 ### Inspecting Query() rows (sql.Rows)
 
+        defer rows.Close()
+        // ...
         for rows.Next() {
                 var (
                         i int

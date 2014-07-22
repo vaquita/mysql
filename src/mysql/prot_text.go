@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -92,6 +93,7 @@ const (
 		clientLongFlag |
 		clientConnectWithDb |
 		clientTransactions |
+		clientLocalFiles |
 		clientProtocol41 |
 		clientSecureConnection |
 		clientMultiResults |
@@ -172,10 +174,10 @@ func (c *Conn) writePacket(b []byte) error {
 //<!-- generic response packets -->
 
 const (
-	okPacket                 = 0x00
-	errPacket                = 0xff
-	eofPacket                = 0xfe
-	localInfileRequestPacket = 0xfb
+	okPacket        = 0x00
+	errPacket       = 0xff
+	eofPacket       = 0xfe
+	infileReqPacket = 0xfb
 )
 
 // parseOkPacket parses the OK packet received from the server.
@@ -643,14 +645,28 @@ func (c *Conn) handleExecResponse() (*Result, error) {
 	}
 
 	switch b[0] {
-	case errPacket:
+
+	case errPacket: // expected
+		// handle err packet
 		c.parseErrPacket(b)
 		return nil, &c.e
-	case okPacket:
+
+	case okPacket: // expected
+		// parse Ok packet and break
 		c.parseOkPacket(b)
 		break
-	default:
-		// TODO: handle error
+
+	case infileReqPacket: // expected
+		// local infile request; handle it
+		if err = c.handleInfileRequest(string(b[1:])); err != nil {
+			return nil, err
+		}
+	default: // unexpected
+		// the command resulted in Rows (anti-pattern ?); but since it
+		// succeeded, we handle it and return nil
+		columnCount, _ := getLenencInt(b)
+		_, err = c.handleResultSet(uint16(columnCount)) // Rows ignored!
+		return nil, err
 	}
 
 	res := new(Result)
@@ -670,19 +686,32 @@ func (c *Conn) handleQueryResponse() (*Rows, error) {
 	}
 
 	switch b[0] {
-	case errPacket:
+	case errPacket: // expected
+		// handle err packet
 		c.parseErrPacket(b)
 		return nil, &c.e
-	case localInfileRequestPacket: // local infile request
-		// TODO: add support for local infile request
-	default: // result set
-		// get the column count (TODO: columnCount: uint16 or uint64 // ??)
-		columnCount, _ := getLenencInt(b)
-		return c.handleResultSet(uint16(columnCount))
+
+	case okPacket: // unexpected!
+		// the command resulted in a Result (anti-pattern ?); but
+		// since it succeeded we handle it and return nil.
+		c.parseOkPacket(b)
+		return nil, nil
+
+	case infileReqPacket: // unexpected!
+		// local infile request; handle it and return nil
+		if err = c.handleInfileRequest(string(b[1:])); err != nil {
+			return nil, err
+		}
+		return nil, nil
+
+	default: // expected
+		// break and handle result set
+		break
 	}
 
-	// control shouldn't reach here
-	return nil, nil
+	// handle result set
+	columnCount, _ := getLenencInt(b)
+	return c.handleResultSet(uint16(columnCount))
 }
 
 func (c *Conn) handleResultSet(columnCount uint16) (*Rows, error) {
@@ -826,4 +855,76 @@ func replacePlaceholders(query string, args []driver.Value) string {
 	}
 	final = append(final, s[len(s)-1])
 	return strings.Join(final, "")
+}
+
+func (c *Conn) handleInfileRequest(filename string) error {
+	var (
+		b   []byte
+		err error
+	)
+
+	if b, err = createInfileDataPacket(filename); err != nil {
+		return err
+	}
+
+	// send file contents to the server
+	if err = c.writePacket(b); err != nil {
+		return err
+	}
+
+	// send an empty packet
+	if err = c.writePacket(createEmptyPacket()); err != nil {
+		return err
+	}
+
+	// read ok/err packet from the server
+	if b, err = c.readPacket(); err != nil {
+		return err
+	}
+
+	switch b[0] {
+	case errPacket:
+		// handle err packet
+		c.parseErrPacket(b)
+		return &c.e
+
+	case okPacket:
+		// parse Ok packet
+		c.parseOkPacket(b)
+	default:
+		// TODO: handle error
+	}
+	return nil
+}
+
+// createInfileDataPacket generates a packet containing contents of the
+// requested local file
+func createInfileDataPacket(filename string) ([]byte, error) {
+	var (
+		f   *os.File
+		fi  os.FileInfo
+		err error
+	)
+
+	if f, err = os.Open(filename); err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	if fi, err = f.Stat(); err != nil {
+		return nil, err
+	}
+
+	b := make([]byte, packetHeaderSize+fi.Size())
+
+	if _, err = f.Read(b[4:]); err != nil {
+		return nil, err
+	}
+
+	return b, nil
+}
+
+// createEmptyPacket generates an empty packet.
+func createEmptyPacket() []byte {
+	return make([]byte, packetHeaderSize)
 }

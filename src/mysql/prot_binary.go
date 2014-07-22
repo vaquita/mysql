@@ -282,8 +282,6 @@ func (s *Stmt) handleExec(args []driver.Value) (*Result, error) {
 
 // handleExecute handles COM_STMT_EXECUTE and related packets for Stmt's Query()
 func (s *Stmt) handleQuery(args []driver.Value) (*Rows, error) {
-	var err error
-
 	// reset the protocol packet sequence number
 	s.c.sequenceId = 0
 
@@ -291,7 +289,7 @@ func (s *Stmt) handleQuery(args []driver.Value) (*Rows, error) {
 	s.newParamsBoundFlag = 1
 
 	// send COM_STMT_EXECUTE to the server
-	if err = s.c.writePacket(createComStmtExecute(s, args)); err != nil {
+	if err := s.c.writePacket(createComStmtExecute(s, args)); err != nil {
 		return nil, err
 	}
 
@@ -348,14 +346,28 @@ func (s *Stmt) handleExecResponse() (*Result, error) {
 	}
 
 	switch b[0] {
-	case errPacket:
+
+	case errPacket: // expected
+		// handle err packet
 		c.parseErrPacket(b)
 		return nil, &c.e
-	case okPacket:
+
+	case okPacket: // expected
+		// parse Ok packet and break
 		c.parseOkPacket(b)
 		break
-	default:
-		// TODO: handle error
+
+	case infileReqPacket: // expected
+		// local infile request; handle it
+		if err = c.handleInfileRequest(string(b[1:])); err != nil {
+			return nil, err
+		}
+	default: // unexpected
+		// the command resulted in Rows (anti-pattern ?); but since it
+		// succeeded, we handle it and return nil
+		columnCount, _ := getLenencInt(b)
+		_, err = c.handleBinaryResultSet(uint16(columnCount)) // Rows ignored!
+		return nil, err
 	}
 
 	res := new(Result)
@@ -377,17 +389,32 @@ func (s *Stmt) handleQueryResponse() (*Rows, error) {
 	}
 
 	switch b[0] {
-	case errPacket:
+	case errPacket: // expected
+		// handle err packet
 		c.parseErrPacket(b)
 		return nil, &c.e
-	default: // result set
-		// get the column count (TODO: columnCount: uint16 or uint64 // ??)
-		columnCount, _ := getLenencInt(b)
-		return c.handleBinaryResultSet(uint16(columnCount))
+
+	case okPacket: // unexpected!
+		// the command resulted in a Result (anti-pattern ?); but
+		// since it succeeded we handle it and return nil.
+		c.parseOkPacket(b)
+		return nil, nil
+
+	case infileReqPacket: // unexpected!
+		// local infile request; handle it and return nil
+		if err = c.handleInfileRequest(string(b[1:])); err != nil {
+			return nil, err
+		}
+		return nil, nil
+
+	default: // expected
+		// break and handle result set
+		break
 	}
 
-	// control shouldn't reach here
-	return nil, nil
+	// handle result set
+	columnCount, _ := getLenencInt(b)
+	return c.handleBinaryResultSet(uint16(columnCount))
 }
 
 func (c *Conn) handleBinaryResultSet(columnCount uint16) (*Rows, error) {
