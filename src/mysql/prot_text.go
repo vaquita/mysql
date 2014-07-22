@@ -5,6 +5,9 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"reflect"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -605,32 +608,11 @@ func parseColumnDefinitionPacket(b []byte, isComFieldList bool) *columnDefinitio
 
 // handleExec handles COM_QUERY and related packets for Conn's Exec()
 func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, error) {
-	var (
-		err    error
-		_query string
-		_args  []interface{}
-	)
-
 	// reset the protocol packet sequence number
 	c.sequenceId = 0
 
-	if len(args) > 0 {
-		// TODO: find a better way to perform the []driver.Value ->
-		// []interface{} conversion
-		_args = make([]interface{}, len(args))
-		for i := 0; i < len(args); i++ {
-			switch v := args[i].(type) {
-			default:
-				_args[i] = v
-			}
-		}
-		_query = fmt.Sprintf(query, _args...)
-	} else {
-		_query = query
-	}
-
 	// send COM_QUERY to the server
-	if err = c.writePacket(createComQuery(_query)); err != nil {
+	if err := c.writePacket(createComQuery(replacePlaceholders(query, args))); err != nil {
 		return nil, err
 	}
 
@@ -639,32 +621,11 @@ func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, err
 
 // handleQuery handles COM_QUERY and related packets for Conn's Query()
 func (c *Conn) handleQuery(query string, args []driver.Value) (driver.Rows, error) {
-	var (
-		err    error
-		_query string
-		_args  []interface{}
-	)
-
 	// reset the protocol packet sequence number
 	c.sequenceId = 0
 
-	if len(args) > 0 {
-		// TODO: find a better way to perform the []driver.Value ->
-		// []interface{} conversion
-		_args = make([]interface{}, len(args))
-		for i := 0; i < len(args); i++ {
-			switch v := args[i].(type) {
-			default:
-				_args[i] = v
-			}
-		}
-		_query = fmt.Sprintf(query, _args...)
-	} else {
-		_query = query
-	}
-
 	// send COM_QUERY to the server
-	if err = c.writePacket(createComQuery(_query)); err != nil {
+	if err := c.writePacket(createComQuery(replacePlaceholders(query, args))); err != nil {
 		return nil, err
 	}
 
@@ -801,4 +762,68 @@ func (c *Conn) handleQuit() error {
 	c.sequenceId = 0
 
 	return c.writePacket(createComQuit())
+}
+
+// stringify converts the given argument of arbitrary type to string. 'quote'
+// decides whether to quote (single-quote) the give resulting string.
+func stringify(d interface{}, quote bool) string {
+	switch v := d.(type) {
+	case string:
+		if quote {
+			return "'" + v + "'"
+		}
+		return v
+	case []byte:
+		s := string(v)
+		if quote {
+			return "'" + s + "'"
+		}
+		return s
+	case bool:
+		if v {
+			return "TRUE"
+		} else {
+			return "FALSE"
+		}
+	case time.Time:
+		t := fmt.Sprintf("%d-%d-%d %d:%d:%d", v.Year(), int(v.Month()), v.Day(), v.Hour(), v.Minute(), v.Second())
+		if quote {
+			return strconv.Quote(t)
+		}
+		return t
+	case nil:
+		return "NULL"
+	}
+
+	rv := reflect.ValueOf(d)
+	switch rv.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return strconv.FormatInt(rv.Int(), 10)
+	case reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return strconv.FormatUint(rv.Uint(), 10)
+	case reflect.Float32:
+		return strconv.FormatFloat(rv.Float(), 'f', -1, 32)
+	case reflect.Float64:
+		return strconv.FormatFloat(rv.Float(), 'f', -1, 64)
+	default:
+		// TODO: unsupported type?
+	}
+	return fmt.Sprintf("%v", d)
+}
+
+// replacePlaceholders replaces all ?'s with the stringified arguments.
+func replacePlaceholders(query string, args []driver.Value) string {
+	if len(args) == 0 {
+		return query
+	}
+
+	s := strings.Split(query, "?")
+	final := make([]string, 0)
+
+	for i, arg := range args {
+		final = append(final, s[i])
+		final = append(final, stringify(arg, true))
+	}
+	final = append(final, s[len(s)-1])
+	return strings.Join(final, "")
 }

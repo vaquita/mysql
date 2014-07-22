@@ -213,40 +213,36 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 		return
 	}
 
+	more := s.paramCount > 0 // more packets ?
+
 	// parameter definition block: read param definition packet(s)
-	for i := uint16(0); i < s.paramCount; i++ {
+	for more {
 		if b, err = c.readPacket(); err != nil {
 			return
-		} else {
-			s.paramDefs = append(s.paramDefs,
-				parseColumnDefinitionPacket(b, false))
+		}
+		switch b[0] {
+		case eofPacket: // EOF packet, done!
+			c.parseEOFPacket(b)
+			more = false
+		default: // column definition packet
+			s.paramDefs = append(s.paramDefs, parseColumnDefinitionPacket(b, false))
 		}
 	}
 
-	// read EOF packet
-	if b, err = c.readPacket(); err != nil {
-		return
-	} else {
-		c.parseEOFPacket(b)
-	}
+	more = s.columnCount > 0
 
-	// column definition block: read column definition packet(s)
-	for i := uint16(0); i < s.columnCount; i++ {
+	for more {
 		if b, err = c.readPacket(); err != nil {
 			return
-		} else {
-			s.columnDefs = append(s.columnDefs,
-				parseColumnDefinitionPacket(b, false))
+		}
+		switch b[0] {
+		case eofPacket: // EOF packet, done!
+			c.parseEOFPacket(b)
+			more = false
+		default: // column definition packet
+			s.columnDefs = append(s.columnDefs, parseColumnDefinitionPacket(b, false))
 		}
 	}
-
-	// read EOF packet
-	if b, err = c.readPacket(); err != nil {
-		return
-	} else {
-		c.parseEOFPacket(b)
-	}
-
 	return
 }
 
@@ -272,6 +268,9 @@ func (s *Stmt) handleExec(args []driver.Value) (*Result, error) {
 
 	// reset the protocol packet sequence number
 	s.c.sequenceId = 0
+
+	// TODO: set me appropriately
+	s.newParamsBoundFlag = 1
 
 	// send COM_STMT_EXECUTE to the server
 	if err = s.c.writePacket(createComStmtExecute(s, args)); err != nil {

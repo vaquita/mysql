@@ -4,16 +4,6 @@ vaquita
 Go driver for MariaDB/MySQL server
 
 ## Examples
-### Registering the driver
-
-    const driverName = "mysql"
-
-    func register() {
-            var d mysql.Driver
-            sql.Register(driverName, d)
-    }
-
-
 ### Opening a connection
 
         dsn = "mysql://user:pass@localhost:3306/test"
@@ -45,7 +35,7 @@ Go driver for MariaDB/MySQL server
         }
 
         // ..snip..
-        if result, err = db.Exec("insert into test.t1 values (%d, %s)", 1, "NULL"); err != nil {
+        if result, err = db.Exec("insert into test.t1 values (?, ?)", 1, "NULL"); err != nil {
                 fmt.Println("Db.Exec() failed : ", err)
         } else {
                 fmt.Println("record inserted successfully")
