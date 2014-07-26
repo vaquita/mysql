@@ -57,7 +57,7 @@ func (p *properties) parseUrl(dsn string) error {
 	// Socket
 	p.socket = query.Get("Socket")
 
-	// localInfile
+	// LocalInfile
 	if val := query.Get("LocalInfile"); val != "" {
 		if v, err := strconv.ParseBool(val); err != nil {
 			return err

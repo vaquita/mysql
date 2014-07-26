@@ -3,7 +3,6 @@ package mysql
 import (
 	"database/sql/driver"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -104,8 +103,8 @@ const (
 
 //<!-- protocol packet reader/writer -->
 
-// readPacket reads the next protocol packet from the network, verifies the
-// packet sequence number and returns the payload.
+// readPacket reads the next protocol packet from the network and returns the
+// payload after increment the packet sequence number.
 func (c *Conn) readPacket() ([]byte, error) {
 	var err error
 
@@ -118,10 +117,6 @@ func (c *Conn) readPacket() ([]byte, error) {
 	// payload length
 	payloadLength := getUint24(hBuf[0:3])
 
-	// read and verify packet sequence number
-	if c.seqno != uint8(hBuf[3]) {
-		return nil, errors.New("mysql: packets out of order")
-	}
 	// increment the packet sequence number
 	c.seqno++
 
@@ -842,19 +837,20 @@ func replacePlaceholders(query string, args []driver.Value) string {
 
 func (c *Conn) handleInfileRequest(filename string) error {
 	var (
-		b   []byte
-		err error
+		b             []byte
+		err, savedErr error
 	)
 
+	// do not skip on error to avoid "packets out of order"
 	if b, err = createInfileDataPacket(filename); err != nil {
-		return err
+		savedErr = err
+		goto L
+	} else if err = c.writePacket(b); err != nil {
+		savedErr = err
+		goto L
 	}
 
-	// send file contents to the server
-	if err = c.writePacket(b); err != nil {
-		return err
-	}
-
+L:
 	// send an empty packet
 	if err = c.writePacket(createEmptyPacket()); err != nil {
 		return err
@@ -874,10 +870,11 @@ func (c *Conn) handleInfileRequest(filename string) error {
 	case okPacket:
 		// parse Ok packet
 		c.parseOkPacket(b)
+
 	default:
 		// TODO: handle error
 	}
-	return nil
+	return savedErr
 }
 
 // createInfileDataPacket generates a packet containing contents of the
