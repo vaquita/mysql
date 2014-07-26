@@ -17,7 +17,6 @@ func (d Driver) Open(dsn string) (driver.Conn, error) {
 	var err error
 
 	c := &Conn{}
-	c.maxPacketSize = defaultMaxPacketSize
 
 	// parse the dsn
 	if err = c.p.parseUrl(dsn); err != nil {

@@ -19,18 +19,17 @@ type Conn struct {
 	e Error
 
 	// handshake initialization packet (from server)
-	serverVersion         string
-	connectionId          uint32
-	serverCapabilityFlags uint32
-	serverCharacterSet    uint8
-	authPluginData        []byte
-	authPluginName        string
+	serverVersion      string
+	connectionId       uint32
+	serverCapabilities uint32
+	serverCharset      uint8
+	authPluginData     []byte
+	authPluginName     string
 
 	// handshake response packet (from client)
-	maxPacketSize      uint32
-	clientCharacterSet uint8
+	clientCharset uint8
 
-	sequenceId uint8 // packet sequence number
+	seqno uint8 // packet sequence number
 }
 
 func (c *Conn) Prepare(query string) (driver.Stmt, error) {

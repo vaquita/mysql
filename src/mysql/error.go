@@ -15,7 +15,7 @@ type Error struct {
 // Error returns the formatted error message. (also required by Go' error
 // interface)
 func (e *Error) Error() string {
-	return fmt.Sprintf("[%v] mysqld: (%d) %s", e.when, e.code, e.message)
+	return fmt.Sprintf("mysqld: %d (%s): %s", e.code, e.sqlState, e.message)
 }
 
 // Code returns the error number.

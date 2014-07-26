@@ -3,6 +3,42 @@ vaquita
 
 Go driver for MariaDB/MySQL server
 
+## Connection URL & Properties
+
+### URL
+  mysql://[[user][:password]@][host][:port]/[schema]
+    [?propertyName1][=propertyValue1]
+    [&propertyName2][=propertyValue2]...
+
+  * user:
+      User connecting to the server.
+  * password:
+      Password to use when connecting to the server.
+  * host:
+      It is the host name of the machine runing MySQL/MariaDB server.
+      (default: 127.0.0.1)
+  * port:
+      Port number the MySQL/MariaDB server is listening to. (default: 3306)
+  * schema:
+      Name of the schema to connect to.
+  * propertyName=propertyValue
+              - It represents an optional, ampersand-separated list of
+                properties.
+
+  eg. "mysql://root:pass@localhost:3306/test?Socket=/tmp/mysql.sock"
+
+  Reference : http://docs.oracle.com/javase/tutorial/jdbc/basics/connecting.html
+
+### Properties
+  * LocalInfile:
+      Enable 'LOAD DATA LOCAL INFILE' support. (default: false)
+  * MaxAllowedPacket:
+      Maximum client packet size. (default: 16MB)
+  * Socket:
+     Unix socket to connect to the server.
+
+  Note : A property name is in Pascal case (or upper Camel case) and case-sensitive.
+
 ## Examples
 ### Opening a connection
 
@@ -112,7 +148,7 @@ Go driver for MariaDB/MySQL server
 
 Output:
 
-        Db.Exec() failed :  [2014-07-15 18:37:39.157151115 -0400 EDT] mysqld: (1050) Table 't1' already exists
+        Db.Exec() failed :  mysqld: 1050 (42S01): Table 't1' already exists
         | Code | Message                        | SQL State | When                                     |
         | 1050 | Table 't1' already exists      | 42S01     | 2014-07-15 18:37:39.157151115 -0400 EDT  |
 

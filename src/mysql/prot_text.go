@@ -83,18 +83,6 @@ const (
 	clientRememberOptions
 )
 
-const (
-	clientCapabilityFlags = (clientLongPassword |
-		clientLongFlag |
-		clientConnectWithDb |
-		clientTransactions |
-		clientLocalFiles |
-		clientProtocol41 |
-		clientSecureConnection |
-		clientMultiResults |
-		clientPluginAuth)
-)
-
 // server status flags
 const (
 	serverStatusInTrans = 1 << iota
@@ -117,7 +105,7 @@ const (
 //<!-- protocol packet reader/writer -->
 
 // readPacket reads the next protocol packet from the network, verifies the
-// packet sequence ID and returns the payload.
+// packet sequence number and returns the payload.
 func (c *Conn) readPacket() ([]byte, error) {
 	var err error
 
@@ -130,12 +118,12 @@ func (c *Conn) readPacket() ([]byte, error) {
 	// payload length
 	payloadLength := getUint24(hBuf[0:3])
 
-	// read and verify packet sequence ID
-	if c.sequenceId != uint8(hBuf[3]) {
+	// read and verify packet sequence number
+	if c.seqno != uint8(hBuf[3]) {
 		return nil, errors.New("mysql: packets out of order")
 	}
-	// increment the packet sequence ID
-	c.sequenceId++
+	// increment the packet sequence number
+	c.seqno++
 
 	// finally, read the payload
 	pBuf := make([]byte, payloadLength)
@@ -153,15 +141,15 @@ func (c *Conn) writePacket(b []byte) error {
 
 	// populate the packet header
 	putUint24(b[0:3], uint32(len(b)-4)) // payload length
-	b[3] = c.sequenceId                 // packet sequence ID
+	b[3] = c.seqno                      // packet sequence number
 
 	// write it to the network
 	if _, err = c.n.write(b); err != nil {
 		return err
 	}
 
-	// finally, increment the packet sequence ID
-	c.sequenceId++
+	// finally, increment the packet sequence number
+	c.seqno++
 
 	return nil
 }
@@ -244,20 +232,20 @@ func (c *Conn) parseGreetingPacket(b []byte) {
 	off++ // [00] filler
 
 	// capacity flags (lower 2 bytes)
-	c.serverCapabilityFlags = uint32(binary.LittleEndian.Uint16(b[off : off+2]))
+	c.serverCapabilities = uint32(binary.LittleEndian.Uint16(b[off : off+2]))
 	off += 2
 
 	if len(b) > off {
-		c.serverCharacterSet = uint8(b[off])
+		c.serverCharset = uint8(b[off])
 		off++
 
 		c.statusFlags = binary.LittleEndian.Uint16(b[off : off+2]) // status flags
 		off += 2
 		// capacity flags (upper 2 bytes)
-		c.serverCapabilityFlags |= (uint32(binary.LittleEndian.Uint16(b[off:off+2])) << 16)
+		c.serverCapabilities |= (uint32(binary.LittleEndian.Uint16(b[off:off+2])) << 16)
 		off += 2
 
-		if (c.serverCapabilityFlags & clientPluginAuth) != 0 {
+		if (c.serverCapabilities & clientPluginAuth) != 0 {
 			// update the auth plugin data length
 			authDataLength = int(b[off])
 			off++
@@ -267,7 +255,7 @@ func (c *Conn) parseGreetingPacket(b []byte) {
 
 		off += 10 // reserved (all [00])
 
-		if (c.serverCapabilityFlags & clientSecureConnection) != 0 {
+		if (c.serverCapabilities & clientSecureConnection) != 0 {
 			// auth-plugin-data-part-2 : note the offset & update
 			// the length (max(13, authDataLength- 8)
 			if (authDataLength - 8) > 13 {
@@ -285,7 +273,7 @@ func (c *Conn) parseGreetingPacket(b []byte) {
 
 		c.authPluginData = authData
 
-		if (c.serverCapabilityFlags & clientPluginAuth) != 0 {
+		if (c.serverCapabilities & clientPluginAuth) != 0 {
 			// auth-plugin name (null-terminated)
 			c.authPluginName, n = getNullTerminatedString(b[off:])
 			off += n
@@ -309,24 +297,24 @@ func (c *Conn) createHandshakeResponsePacket() []byte {
 	off += 4 // placeholder for protocol packet header
 
 	// client capability flags
-	binary.LittleEndian.PutUint32(b[off:off+4], clientCapabilityFlags)
+	binary.LittleEndian.PutUint32(b[off:off+4], c.p.clientCapabilities)
 	off += 4
 
 	// max packaet size
-	binary.LittleEndian.PutUint32(b[off:off+4], c.maxPacketSize)
+	binary.LittleEndian.PutUint32(b[off:off+4], c.p.maxPacketSize)
 	off += 4
 
 	// client character set
-	b[off] = byte(c.clientCharacterSet) // client character set
+	b[off] = byte(c.clientCharset) // client character set
 	off++
 
 	off += 23 // reserved (all [0])
 
 	off += putNullTerminatedString(b[off:], c.p.username)
 
-	if (c.serverCapabilityFlags & clientPluginAuthLenencClientData) != 0 {
+	if (c.serverCapabilities & clientPluginAuthLenencClientData) != 0 {
 		off += putLenencString(b[off:], string(authData))
-	} else if (c.serverCapabilityFlags & clientSecureConnection) != 0 {
+	} else if (c.serverCapabilities & clientSecureConnection) != 0 {
 		b[off] = byte(authLength)
 		off++
 		off += copy(b[off:], authData)
@@ -334,15 +322,15 @@ func (c *Conn) createHandshakeResponsePacket() []byte {
 		off += putNullTerminatedString(b[off:], string(authData))
 	}
 
-	if (c.serverCapabilityFlags & clientConnectWithDb) != 0 {
+	if (c.p.schema != "") && ((c.serverCapabilities & clientConnectWithDb) != 0) {
 		off += putNullTerminatedString(b[off:], c.p.schema)
 	}
 
-	if (c.serverCapabilityFlags & clientPluginAuth) != 0 {
+	if (c.serverCapabilities & clientPluginAuth) != 0 {
 		off += putNullTerminatedString(b[off:], c.authPluginName)
 	}
 
-	if (c.serverCapabilityFlags & clientConnectAttrs) != 0 {
+	if (c.serverCapabilities & clientConnectAttrs) != 0 {
 		// TODO: handle connection attributes
 	}
 
@@ -356,15 +344,15 @@ func (c *Conn) handshakeResponsePayloadLength(authLength int) (length int) {
 	length += (len(c.p.username) + 1) // null-terminated username
 	length += authLength
 
-	if (c.serverCapabilityFlags & clientConnectWithDb) != 0 {
+	if (c.serverCapabilities & clientConnectWithDb) != 0 {
 		length += (len(c.p.schema) + 1) // null-terminated schema name
 	}
 
-	if (c.serverCapabilityFlags & clientPluginAuth) != 0 {
+	if (c.serverCapabilities & clientPluginAuth) != 0 {
 		length += (len(c.authPluginName) + 1) // null-terminated authentication plugin name
 	}
 
-	if (c.serverCapabilityFlags & clientConnectAttrs) != 0 {
+	if (c.serverCapabilities & clientConnectAttrs) != 0 {
 		// TODO: handle connection attributes
 	}
 	return
@@ -583,7 +571,7 @@ func parseColumnDefinitionPacket(b []byte, isComFieldList bool) *columnDefinitio
 	off += n
 	col.fixedLenFieldLength, n = getLenencInt(b[off:])
 	off += n
-	col.characterSet = binary.LittleEndian.Uint16(b[off : off+2])
+	col.charset = binary.LittleEndian.Uint16(b[off : off+2])
 	off += 2
 	col.columnLength = binary.LittleEndian.Uint32(b[off : off+4])
 	off += 4
@@ -606,7 +594,7 @@ func parseColumnDefinitionPacket(b []byte, isComFieldList bool) *columnDefinitio
 // handleExec handles COM_QUERY and related packets for Conn's Exec()
 func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, error) {
 	// reset the protocol packet sequence number
-	c.sequenceId = 0
+	c.seqno = 0
 
 	// send COM_QUERY to the server
 	if err := c.writePacket(createComQuery(replacePlaceholders(query, args))); err != nil {
@@ -619,7 +607,7 @@ func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, err
 // handleQuery handles COM_QUERY and related packets for Conn's Query()
 func (c *Conn) handleQuery(query string, args []driver.Value) (driver.Rows, error) {
 	// reset the protocol packet sequence number
-	c.sequenceId = 0
+	c.seqno = 0
 
 	// send COM_QUERY to the server
 	if err := c.writePacket(createComQuery(replacePlaceholders(query, args))); err != nil {
@@ -783,7 +771,7 @@ func (c *Conn) handleResultSetRow(b []byte, rs *Rows) *row {
 
 func (c *Conn) handleQuit() error {
 	// reset the protocol packet sequence number
-	c.sequenceId = 0
+	c.seqno = 0
 
 	return c.writePacket(createComQuit())
 }

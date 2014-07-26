@@ -2,43 +2,39 @@ package mysql
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 )
 
-/*
-  Reference :
-  http://docs.oracle.com/javase/tutorial/jdbc/basics/connecting.html
-
-  mysql://[host][,failoverhost...]
-    [:port]/[database]
-    [?propertyName1][=propertyValue1]
-    [&propertyName2][=propertyValue2]...
-
-  * host:port -  It is the host name and port number of the machine running
-                 MySQL/MariaDB server. (default : 127.0.0.1:3306)
-  * database  -  Name of the database to connect to.
-  * propertyName=propertyValue
-              - It represents an optional, ampersand-separated list of
-                properties.
-  eg. "mysql://root:pass@localhost:3306/test?socket=/tmp/mysql.sock"
-*/
-
+// default properties
 const (
 	defaultHost          = "127.0.0.1"
 	defaultPort          = "3306"
-	defaultMaxPacketSize = 1024 * 1024
+	defaultMaxPacketSize = 16 * 1024 * 1024 // 16MB
+	defaultCapabilities  = (clientLongPassword |
+		clientLongFlag |
+		clientTransactions |
+		clientProtocol41 |
+		clientSecureConnection |
+		clientMultiResults |
+		clientPluginAuth)
 )
 
 type properties struct {
-	username    string
-	password    string
-	passwordSet bool
-	address     string // host:port
-	socket      string
-	schema      string
+	username           string
+	password           string
+	passwordSet        bool
+	address            string // host:port
+	schema             string
+	socket             string
+	clientCapabilities uint32
+	maxPacketSize      uint32
 }
 
 func (p *properties) parseUrl(dsn string) error {
+	// initialize default properties
+	p.clientCapabilities = defaultCapabilities
+
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return err
@@ -50,14 +46,41 @@ func (p *properties) parseUrl(dsn string) error {
 	}
 	p.address = u.Host
 	p.address = parseHost(u.Host)
+
 	p.schema = strings.TrimLeft(u.Path, "/")
+	if p.schema != "" {
+		p.clientCapabilities |= clientConnectWithDb
+	}
+
 	query := u.Query()
-	p.socket = query.Get("socket")
+
+	// Socket
+	p.socket = query.Get("Socket")
+
+	// localInfile
+	if val := query.Get("LocalInfile"); val != "" {
+		if v, err := strconv.ParseBool(val); err != nil {
+			return err
+		} else if v {
+			p.clientCapabilities |= clientLocalFiles
+		}
+	}
+
+	// MaxAllowedPacket
+	if val := query.Get("MaxAllowedPacket"); val != "" {
+		if v, err := strconv.ParseUint(val, 10, 32); err != nil {
+			return err
+		} else {
+			p.maxPacketSize = uint32(v)
+		}
+	} else {
+		p.maxPacketSize = defaultMaxPacketSize
+	}
 
 	return nil
 }
 
-// address returns the address in 'host:port' format. default ip (127.0.0.1) and
+// parseHost returns the address in 'host:port' format. default ip (127.0.0.1) and
 // port (3306) are used if not specified.
 func parseHost(addr string) string {
 	var (

@@ -24,7 +24,7 @@ type columnDefinition struct {
 	name                NullString
 	orgName             NullString
 	fixedLenFieldLength uint64
-	characterSet        uint16
+	charset             uint16
 	columnLength        uint32
 	columnType          uint8
 	flags               uint16
