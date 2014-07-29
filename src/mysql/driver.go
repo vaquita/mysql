@@ -17,6 +17,7 @@ func (d Driver) Open(dsn string) (driver.Conn, error) {
 	var err error
 
 	c := &Conn{}
+	c.rw = &defaultReadWriter{}
 
 	// parse the dsn
 	if err = c.p.parseUrl(dsn); err != nil {
@@ -24,7 +25,7 @@ func (d Driver) Open(dsn string) (driver.Conn, error) {
 	}
 
 	// open a connection with the server
-	if err = c.n.dial(c.p.address, c.p.socket); err != nil {
+	if c.conn, err = dial(c.p.address, c.p.socket); err != nil {
 		return nil, err
 	}
 
@@ -32,6 +33,5 @@ func (d Driver) Open(dsn string) (driver.Conn, error) {
 	if err = c.handshake(); err != nil {
 		return nil, err
 	}
-
 	return c, nil
 }

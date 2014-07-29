@@ -4,26 +4,30 @@ import (
 	"net"
 )
 
-type _net struct {
-	c net.Conn
-}
-
 // dial opens a connection with the server; prefer socket if specified.
-func (n *_net) dial(address, socket string) error {
-	var err error
+func dial(address, socket string) (c net.Conn, err error) {
+	var addr, network string
 
 	if socket != "" {
-		n.c, err = net.Dial("unix", socket)
+		network, addr = "socket", socket
 	} else {
-		n.c, err = net.Dial("tcp", address)
+		network, addr = "tcp", address
 	}
-	return err
+	return net.Dial(network, addr)
 }
 
-func (n *_net) read(b []byte) (int, error) {
-	return n.c.Read(b)
+type readWriter interface {
+	read(c net.Conn, b []byte) (n int, err error)
+	write(c net.Conn, b []byte) (n int, err error)
 }
 
-func (n *_net) write(b []byte) (int, error) {
-	return n.c.Write(b)
+type defaultReadWriter struct {
+}
+
+func (rw *defaultReadWriter) read(c net.Conn, b []byte) (n int, err error) {
+	return c.Read(b)
+}
+
+func (rw *defaultReadWriter) write(c net.Conn, b []byte) (n int, err error) {
+	return c.Write(b)
 }

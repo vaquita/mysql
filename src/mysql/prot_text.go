@@ -101,54 +101,6 @@ const (
 	serverSessionStateChanged
 )
 
-//<!-- protocol packet reader/writer -->
-
-// readPacket reads the next protocol packet from the network and returns the
-// payload after increment the packet sequence number.
-func (c *Conn) readPacket() ([]byte, error) {
-	var err error
-
-	// first read the packet header
-	hBuf := make([]byte, 4)
-	if _, err = c.n.read(hBuf); err != nil {
-		return nil, err
-	}
-
-	// payload length
-	payloadLength := getUint24(hBuf[0:3])
-
-	// increment the packet sequence number
-	c.seqno++
-
-	// finally, read the payload
-	pBuf := make([]byte, payloadLength)
-	if _, err = c.n.read(pBuf); err != nil {
-		return nil, err
-	}
-
-	return pBuf, nil
-}
-
-// writePacket accepts the protocol packet to be written, populates the header
-// and writes it to the network.
-func (c *Conn) writePacket(b []byte) error {
-	var err error
-
-	// populate the packet header
-	putUint24(b[0:3], uint32(len(b)-4)) // payload length
-	b[3] = c.seqno                      // packet sequence number
-
-	// write it to the network
-	if _, err = c.n.write(b); err != nil {
-		return err
-	}
-
-	// finally, increment the packet sequence number
-	c.seqno++
-
-	return nil
-}
-
 //<!-- generic response packets -->
 
 const (
