@@ -35,7 +35,13 @@ Go driver for MariaDB/MySQL server
   * MaxAllowedPacket:
       Maximum client packet size. (default: 16MB)
   * Socket:
-     Unix socket to connect to the server.
+      Unix socket to connect to the server.
+  * SSLCA:
+      File containing a list of SSL CAs.
+  * SSLCert:
+      SSL certificate file.
+  * SSLKey:
+      SSL key file.
 
   Note : A property name is in Pascal case (or upper Camel case) and case-sensitive.
 

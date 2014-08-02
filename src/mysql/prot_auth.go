@@ -86,49 +86,32 @@ func (c *Conn) createHandshakeResponsePacket() []byte {
 	var (
 		authData []byte // auth response data
 		off      int
-		isSSL    bool
 	)
-
-	if c.serverCapabilities&clientSSL != 0 &&
-		c.p.clientCapabilities&clientSSL != 0 {
-		isSSL = true
-	}
 
 	payloadLength := (4 + 4 + 1 + 23)
 
-	if !isSSL {
-		authData = c.authResponseData()
-		payloadLength += c.handshakeResponseExtraLength(len(authData))
-	}
+	authData = c.authResponseData()
+	payloadLength += c.handshakeResponse2Length(len(authData))
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
 	off += c.populateHandshakeResponse1(b[off:])
 
-	if !isSSL {
-		c.populateHandshakeResponse2(b[off:], authData)
-	}
+	c.populateHandshakeResponse2(b[off:], authData)
+
 	return b
 }
 
-// createHandshakeResponsePacket2 generates a packet containing all the
-// information starting user name from the protocol's handshake response
-// packet. This packet, storing 2nd part of handshake response, is sent
-// after the SSL connection has been established.
-func (c *Conn) createHandshakeResponsePacket2() []byte {
-	var (
-		authData []byte // auth response data
-		off      int
-	)
-
-	authData = c.authResponseData()
-	payloadLength := c.handshakeResponseExtraLength(len(authData))
+// createSSLRequestPacket generates the SSL request packet to initiate SSL
+// handshake. It is sent to the server over plain connection after which the
+// communication is switched to SSL.
+func (c *Conn) createSSLRequestPacket() []byte {
+	payloadLength := (4 + 4 + 1 + 23)
 
 	b := make([]byte, 4+payloadLength)
-	off += 4 // placeholder for protocol packet header
 
-	c.populateHandshakeResponse2(b[off:], authData)
+	c.populateHandshakeResponse1(b[4:])
 
 	return b
 }
@@ -188,9 +171,9 @@ func (c *Conn) populateHandshakeResponse2(b []byte, authData []byte) int {
 	return off
 }
 
-// handshakeResponseExtraLength returns the extra payload length of the
-// handshake response packet starting user name.
-func (c *Conn) handshakeResponseExtraLength(authLength int) (length int) {
+// handshakeResponse2Length returns the extra payload length of the handshake
+// response packet starting user name.
+func (c *Conn) handshakeResponse2Length(authLength int) (length int) {
 	length += (len(c.p.username) + 1) // null-terminated username
 	length += authLength
 
@@ -210,7 +193,10 @@ func (c *Conn) handshakeResponseExtraLength(authLength int) (length int) {
 
 // handshake performs handshake during connection establishment
 func (c *Conn) handshake() (err error) {
-	var b []byte
+	var (
+		b      []byte
+		useSSL bool
+	)
 
 	// read handshake initialization packet.
 	if b, err = c.readPacket(); err != nil {
@@ -219,9 +205,34 @@ func (c *Conn) handshake() (err error) {
 
 	c.parseGreetingPacket(b)
 
-	// send handshake response packet
-	if err = c.writePacket(c.createHandshakeResponsePacket()); err != nil {
-		return
+	// note : server capabilities can only be checked after receiving the
+	// "greeting" packet
+	if c.serverCapabilities&clientSSL != 0 &&
+		c.p.clientCapabilities&clientSSL != 0 {
+		useSSL = true
+	}
+
+	if !useSSL {
+		// send plain handshake response packet
+		if err = c.writePacket(c.createHandshakeResponsePacket()); err != nil {
+			return
+		}
+	} else {
+		// send SSL request packet (1st part of handshake response
+		// packet)
+		if err = c.writePacket(c.createSSLRequestPacket()); err != nil {
+			return
+		}
+
+		// switch to tls
+		if err = c.sslConnect(); err != nil {
+			return
+		}
+
+		// now send the entire handshake response packet
+		if err = c.writePacket(c.createHandshakeResponsePacket()); err != nil {
+			return
+		}
 	}
 
 	// read server response
@@ -248,7 +259,7 @@ func (c *Conn) authResponseData() []byte {
 	return scramble41(c.p.password, c.authPluginData)
 }
 
-// formula :
+// scraamble41 returns a scramble buffer based on the following formula:
 // SHA1(password) XOR SHA1("20-byte public seed from server" <concat> SHA1( SHA1( password)))
 func scramble41(password string, seed []byte) (buf []byte) {
 	if len(password) == 0 {
@@ -277,5 +288,3 @@ func scramble41(password string, seed []byte) (buf []byte) {
 	}
 	return
 }
-
-//<!-- SSL support -->

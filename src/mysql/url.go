@@ -29,6 +29,10 @@ type properties struct {
 	socket             string
 	clientCapabilities uint32
 	maxPacketSize      uint32
+
+	sslCA   string
+	sslCert string
+	sslKey  string
 }
 
 func (p *properties) parseUrl(dsn string) error {
@@ -75,6 +79,24 @@ func (p *properties) parseUrl(dsn string) error {
 		}
 	} else {
 		p.maxPacketSize = defaultMaxPacketSize
+	}
+
+	// SSLCA
+	if val := query.Get("SSLCA"); val != "" {
+		p.sslCA = val
+		p.clientCapabilities |= clientSSL
+	}
+
+	// SSLCert
+	if val := query.Get("SSLCert"); val != "" {
+		p.sslCert = val
+		p.clientCapabilities |= clientSSL
+	}
+
+	// SSLKey
+	if val := query.Get("SSLKey"); val != "" {
+		p.sslKey = val
+		p.clientCapabilities |= clientSSL
 	}
 
 	return nil
