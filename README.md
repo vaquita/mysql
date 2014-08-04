@@ -30,6 +30,8 @@ Go driver for MariaDB/MySQL server
   Reference : http://docs.oracle.com/javase/tutorial/jdbc/basics/connecting.html
 
 ### Properties
+  * Compress:
+      Compress protocol network packets using zlib.
   * LocalInfile:
       Enable 'LOAD DATA LOCAL INFILE' support. (default: false)
   * MaxAllowedPacket:

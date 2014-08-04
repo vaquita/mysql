@@ -77,3 +77,9 @@ func (c *Conn) writePacket(b []byte) error {
 
 	return nil
 }
+
+// resetSeqno resets the packet sequence number.
+func (c *Conn) resetSeqno() {
+	c.seqno = 0
+	c.rw.reset()
+}

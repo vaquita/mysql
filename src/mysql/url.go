@@ -99,6 +99,15 @@ func (p *properties) parseUrl(dsn string) error {
 		p.clientCapabilities |= clientSSL
 	}
 
+	// Compress
+	if val := query.Get("Compress"); val != "" {
+		if v, err := strconv.ParseBool(val); err != nil {
+			return err
+		} else if v {
+			p.clientCapabilities |= clientCompress
+		}
+	}
+
 	return nil
 }
 

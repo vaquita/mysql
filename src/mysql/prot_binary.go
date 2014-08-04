@@ -179,7 +179,7 @@ func createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) []byte {
 // handleStmtPrepare handles COM_STMT_PREPARE and related packets
 func (c *Conn) handleStmtPrepare(query string) (s *Stmt, err error) {
 	// reset the protocol packet sequence number
-	c.seqno = 0
+	c.resetSeqno()
 
 	// write COM_STMT_PREPARE packet
 	if err = c.writePacket(createComStmtPrepare(query)); err != nil {
@@ -267,7 +267,7 @@ func (s *Stmt) handleExec(args []driver.Value) (*Result, error) {
 	var err error
 
 	// reset the protocol packet sequence number
-	s.c.seqno = 0
+	s.c.resetSeqno()
 
 	// TODO: set me appropriately
 	s.newParamsBoundFlag = 1
@@ -283,7 +283,7 @@ func (s *Stmt) handleExec(args []driver.Value) (*Result, error) {
 // handleExecute handles COM_STMT_EXECUTE and related packets for Stmt's Query()
 func (s *Stmt) handleQuery(args []driver.Value) (*Rows, error) {
 	// reset the protocol packet sequence number
-	s.c.seqno = 0
+	s.c.resetSeqno()
 
 	// TODO: set me appropriately
 	s.newParamsBoundFlag = 1
@@ -930,7 +930,7 @@ func writeTime(b []byte, v time.Duration) int {
 // handleClose handles COM_STMT_CLOSE and related packets
 func (s *Stmt) handleClose() error {
 	// reset the protocol packet sequence number
-	s.c.seqno = 0
+	s.c.resetSeqno()
 
 	// write COM_STMT_CLOSE packet
 	if err := s.c.writePacket(createComStmtClose(s.id)); err != nil {

@@ -388,7 +388,7 @@ func parseColumnDefinitionPacket(b []byte, isComFieldList bool) *columnDefinitio
 // handleExec handles COM_QUERY and related packets for Conn's Exec()
 func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, error) {
 	// reset the protocol packet sequence number
-	c.seqno = 0
+	c.resetSeqno()
 
 	// send COM_QUERY to the server
 	if err := c.writePacket(createComQuery(replacePlaceholders(query, args))); err != nil {
@@ -401,7 +401,7 @@ func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, err
 // handleQuery handles COM_QUERY and related packets for Conn's Query()
 func (c *Conn) handleQuery(query string, args []driver.Value) (driver.Rows, error) {
 	// reset the protocol packet sequence number
-	c.seqno = 0
+	c.resetSeqno()
 
 	// send COM_QUERY to the server
 	if err := c.writePacket(createComQuery(replacePlaceholders(query, args))); err != nil {
@@ -565,7 +565,7 @@ func (c *Conn) handleResultSetRow(b []byte, rs *Rows) *row {
 
 func (c *Conn) handleQuit() error {
 	// reset the protocol packet sequence number
-	c.seqno = 0
+	c.resetSeqno()
 
 	return c.writePacket(createComQuit())
 }

@@ -3,6 +3,7 @@ package mysql
 import (
 	"crypto/sha1"
 	"encoding/binary"
+	"errors"
 )
 
 //<!-- connection phase packets -->
@@ -194,8 +195,8 @@ func (c *Conn) handshakeResponse2Length(authLength int) (length int) {
 // handshake performs handshake during connection establishment
 func (c *Conn) handshake() (err error) {
 	var (
-		b      []byte
-		useSSL bool
+		b                      []byte
+		useSSL, useCompression bool
 	)
 
 	// read handshake initialization packet.
@@ -207,9 +208,24 @@ func (c *Conn) handshake() (err error) {
 
 	// note : server capabilities can only be checked after receiving the
 	// "greeting" packet
-	if c.serverCapabilities&clientSSL != 0 &&
-		c.p.clientCapabilities&clientSSL != 0 {
-		useSSL = true
+	if c.p.clientCapabilities&clientSSL != 0 {
+		if c.serverCapabilities&clientSSL == 0 {
+			// error: client requested for SSL but server doesn't
+			// support SSL.
+			return errors.New("mysql: server does not support SSL connection")
+		} else {
+			useSSL = true
+		}
+	}
+
+	if c.p.clientCapabilities&clientCompress != 0 {
+		if c.serverCapabilities&clientCompress == 0 {
+			// error: client requested for packet compression but server doesn't
+			// support compression protocol.
+			return errors.New("mysql: server does not support packet compression")
+		} else {
+			useCompression = true
+		}
 	}
 
 	if !useSSL {
@@ -229,6 +245,8 @@ func (c *Conn) handshake() (err error) {
 			return
 		}
 
+		// <!-- SSL activated -->
+
 		// now send the entire handshake response packet
 		if err = c.writePacket(c.createHandshakeResponsePacket()); err != nil {
 			return
@@ -246,9 +264,13 @@ func (c *Conn) handshake() (err error) {
 		return &c.e
 	case okPacket:
 		c.parseOkPacket(b)
-		return nil
 	default:
 		// TODO: invalid packet
+	}
+
+	if useCompression { // switch to compression protocol
+		c.rw = &compressRW{}
+		// <!-- Compression activated -->
 	}
 	return nil
 }
