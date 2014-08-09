@@ -17,19 +17,19 @@ type Rows struct {
 }
 
 type columnDefinition struct {
-	catalog             NullString
-	schema              NullString
-	table               NullString
-	orgTable            NullString
-	name                NullString
-	orgName             NullString
+	catalog             nullString
+	schema              nullString
+	table               nullString
+	orgTable            nullString
+	name                nullString
+	orgName             nullString
 	fixedLenFieldLength uint64
 	charset             uint16
 	columnLength        uint32
 	columnType          uint8
 	flags               uint16
 	decimals            uint8
-	defaultValues       NullString
+	defaultValues       nullString
 }
 
 type row struct {

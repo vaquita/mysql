@@ -640,10 +640,9 @@ const (
   MYSQL_TYPE_GEOMETRY
 */
 
-func parseString(b []byte) (s string, n int) {
-	var _s NullString
-	_s, n = getLenencString(b)
-	return _s.value, n
+func parseString(b []byte) (string, int) {
+	v, n := getLenencString(b)
+	return v.value, n
 }
 
 func parseUint64(b []byte) uint64 {

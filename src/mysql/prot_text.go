@@ -543,7 +543,7 @@ func (c *Conn) handleResultSet(columnCount uint16) (*Rows, error) {
 
 func (c *Conn) handleResultSetRow(b []byte, rs *Rows) *row {
 	var (
-		v      NullString
+		v      nullString
 		off, n int
 	)
 

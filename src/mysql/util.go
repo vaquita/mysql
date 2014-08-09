@@ -87,7 +87,7 @@ func lenencIntSize(v int) int {
 }
 
 // length-encoded string
-func getLenencString(b []byte) (s NullString, n int) {
+func getLenencString(b []byte) (s nullString, n int) {
 	length, n := getLenencInt(b)
 
 	if length == 0xfb { // NULL
