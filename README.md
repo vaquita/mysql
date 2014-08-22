@@ -1,7 +1,6 @@
-vaquita
+Go driver for MariaDB/MySQL server
 =======
 
-Go driver for MariaDB/MySQL server
 
 ## Connection URL & Properties
 
