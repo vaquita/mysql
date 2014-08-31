@@ -40,3 +40,7 @@ func (s *Stmt) Exec(args []driver.Value) (driver.Result, error) {
 func (s *Stmt) Query(args []driver.Value) (driver.Rows, error) {
 	return s.handleQuery(args)
 }
+
+func (s *Stmt) ColumnConverter(idx int) driver.ValueConverter {
+	return defaultParameterConverter
+}

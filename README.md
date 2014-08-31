@@ -128,7 +128,7 @@ Go driver for MariaDB/MySQL server
 
         // execute
         if rows, err = stmt.Query(1); err != nil {
-                fmt.Println("Db.Exec() failed : ", err)
+                fmt.Println("Stmt.Query() failed : ", err)
         } else {
                 // process rows
         }

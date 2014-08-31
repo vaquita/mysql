@@ -103,7 +103,6 @@ func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
 					poff += 2
 					off += writeDate(b[off:], v)
 				case nil:
-
 					binary.LittleEndian.PutUint16(b[poff:poff+2],
 						uint16(mysqlTypeNull))
 					poff += 2
@@ -322,7 +321,7 @@ func comStmtExecutePayloadLength(s *Stmt, args []driver.Value) (length uint64) {
 					length +=
 						uint64(lenencIntSize(len(v)) + len(v))
 				case time.Time:
-					dateSize(v)
+					length += uint64(dateSize(v))
 				case nil: // noop
 				default: // TODO: handle error
 				}
@@ -838,7 +837,7 @@ func writeDate(b []byte, v time.Time) int {
 }
 
 // dateSize returns the size needed to store a given time.Time.
-func dateSize(v time.Time) (length int) {
+func dateSize(v time.Time) (length uint8) {
 	var (
 		month, day, hour, min, sec uint8
 		year                       uint16
