@@ -11,110 +11,109 @@ import (
 	"time"
 )
 
-// server commands
+// server commands (unexported)
 const (
-	comSleep = iota
-	comQuit
-	comInitDb
-	comQuery
-	comFieldList
-	comCreateDb
-	comDropDb
-	comRefresh
-	comShutdown
-	comStatistics
-	comProcessInfo
-	comConnect
-	comProcessKill
-	comDebug
-	comPing
-	comTime
-	comDelayedInsert
-	comChangeUser
-	comBinlogDump
-	comTableDump
-	comConnectOuT
-	comRegisterSlave
-	comStmtPrepare
-	comStmtExecute
-	comStmtSendLongData
-	comStmtClose
-	comStmtReset
-	comSetOption
-	comStmtFetch
-	comDaemon
-	comEnd // must always be last
+	_ = iota // _COM_SLEEP
+	_COM_QUIT
+	_COM_INIT_DB
+	_COM_QUERY
+	_COM_FIELD_LIST
+	_COM_CREATE_DB
+	_COM_DROP_DB
+	_COM_REFRESH
+	_COM_SHUTDOWN
+	_COM_STATISTICS
+	_COM_PROCESS_INFO
+	_COM_CONNECT
+	_ // _COM_PROCESS_KILL
+	_ //_COM_DEBUG
+	_COM_PING
+	_ // _COM_TIME
+	_ //_COM_DELAYED_INSERT
+	_COM_CHANGE_USER
+	_COM_BINLOG_DUMP
+	_COM_TABLE_DUMP
+	_ // _COM_CONNECT_OUT
+	_COM_REGISTER_SLAVE
+	_COM_STMT_PREPARE
+	_COM_STMT_EXECUTE
+	_COM_STMT_SEND_LONG_DATA
+	_COM_STMT_CLOSE
+	_COM_STMT_RESET
+	_COM_SET_OPTION
+	_COM_STMT_FETCH
+	_        // _COM_DAEMON
+	_COM_END // must always be last
 )
 
-// client/server capability flags
+// client/server capability flags (unexported)
 const (
-	clientLongPassword = 1 << iota
-	clientFoundRows
-	clientLongFlag
-	clientConnectWithDb
-	clientNoSchema
-	clientCompress
-	clientODBC
-	clientLocalFiles
-	clientIgnoreSpace
-	clientProtocol41
-	clientInteractive
-	clientSSL
-	clientIgnoreSIGPIPE
-	clientTransactions
-	clientReserved
-	clientSecureConnection
-	clientMultiStatements
-	clientMultiResults
-	clientPSMultiResults
-	clientPluginAuth
-	clientConnectAttrs
-	clientPluginAuthLenencClientData
-	clientCanHandleExpiredPasswords
-	clientSessionTrack
+	_CLIENT_LONG_PASSWORD = 1 << iota
+	_CLIENT_FOUND_ROWS
+	_CLIENT_LONG_FLAG
+	_CLIENT_CONNECT_WITH_DB
+	_CLIENT_NO_SCHEMA
+	_CLIENT_COMPRESS
+	_CLIENT_ODBC
+	_CLIENT_LOCAL_FILES
+	_CLIENT_IGNORE_SPACE
+	_CLIENT_PROTOCOL41
+	_CLIENT_INTERACTIVE
+	_CLIENT_SSL
+	_CLIENT_IGNORE_SIGPIPE
+	_CLIENT_TRANSACTIONS
+	_CLIENT_RESERVED
+	_CLIENT_SECURE_CONNECTION
+	_CLIENT_MULTI_STATEMENTS
+	_CLIENT_MULTI_RESULTS
+	_CLIENT_PS_MULTI_RESULTS
+	_CLIENT_PLUGIN_AUTH
+	_CLIENT_CONNECT_ATTRS
+	_CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA
+	_CLIENT_CAN_HANDLE_EXPIRED_PASSWORDS
+	_CLIENT_SESSION_TRACK
 	_ // unassigned, 1 << 24
 	_
 	_
 	_
 	_
-	clientProgress // 1 << 29
-	clientSSLVerifyServerCert
-	clientRememberOptions
+	_CLIENT_PROGRESS // 1 << 29
+	_CLIENT_SSL_VERIFY_SERVER_CERT
+	_CLIENT_REMEMBER_OPTIONS
 )
 
-// server status flags
+// server status flags (unexported)
 const (
-	serverStatusInTrans = 1 << iota
-	serverStatusAutocommit
+	_SERVER_STATUS_IN_TRANS = 1 << iota
+	_SERVER_STATUS_AUTOCOMMIT
 	_ // unassigned, 4
-	serverMoreResultsExists
-	serverStatusNoGoodIndexUsed
-	serverStatusNoIndexUsed
-	serverStatusCursorExists
-	serverStatusLastRowSent
-	serverStatusDbDropped
-	serverStatusNoBackshashEscapes
-	serverStatusMetadataChanged
-	serverQueryWasSlow
-	serverPSOutParams
-	serverStatusInTransReadonly
-	serverSessionStateChanged
+	_SERVER_MORE_RESULTS_EXISTS
+	_SERVER_STATUS_NO_GOOD_INDEX_USED
+	_SERVER_STATUS_NO_INDEX_USED
+	_SERVER_STATUS_CURSOR_EXISTS
+	_SERVER_STATUS_LAST_ROW_SENT
+	_SERVER_STATUS_DB_DROPPED
+	_SERVER_STATUS_NO_BACKSHASH_ESCAPES
+	_SERVER_STATUS_METADATA_CHANGED
+	_SERVER_QUERY_WAS_SLOW
+	_SERVER_PS_OUT_PARAMS
+	_SERVER_STATUS_IN_TRANS_READONLY
+	_SERVER_SESSION_STATE_CHANGED
 )
 
-//<!-- generic response packets -->
-
+// generic response packets (unexported)
 const (
-	okPacket        = 0x00
-	errPacket       = 0xff
-	eofPacket       = 0xfe
-	infileReqPacket = 0xfb
+	_PACKET_OK         = 0x00
+	_PACKET_ERR        = 0xff
+	_PACKET_EOF        = 0xfe
+	_PACKET_INFILE_REQ = 0xfb
 )
 
 // parseOkPacket parses the OK packet received from the server.
 func (c *Conn) parseOkPacket(b []byte) {
 	var off, n int
 
-	off++ // [00] the OK header (= okPacket)
+	off++ // [00] the OK header (= _PACKET_OK)
 	c.affectedRows, n = getLenencInt(b[off:])
 	off += n
 	c.lastInsertId, n = getLenencInt(b[off:])
@@ -145,7 +144,7 @@ func (c *Conn) parseErrPacket(b []byte) {
 func (c *Conn) parseEOFPacket(b []byte) {
 	var off int
 
-	off++ // [fe] the EOF header (= eofPacket)
+	off++ // [fe] the EOF header (= _PACKET_EOF)
 	// TODO: reset warning count
 	c.warnings += binary.LittleEndian.Uint16(b[off : off+2])
 	off += 2
@@ -157,11 +156,11 @@ func (c *Conn) parseEOFPacket(b []byte) {
 // createComQuit generates the COM_QUIT packet.
 func createComQuit() (b []byte) {
 	var off int
-	payloadLength := 1 // comQuit
+	payloadLength := 1 // _COM_QUIT
 
 	b = make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
-	b[off] = comQuit
+	b[off] = _COM_QUIT
 	return
 }
 
@@ -169,13 +168,13 @@ func createComQuit() (b []byte) {
 func createComInitDb(schema string) []byte {
 	var off int
 
-	payloadLength := 1 + // comInitDb
+	payloadLength := 1 + // _COM_INIT_DB
 		len(schema) // length of schema name
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comInitDb
+	b[off] = _COM_INIT_DB
 	off++
 
 	off += copy(b[off:], schema)
@@ -186,13 +185,13 @@ func createComInitDb(schema string) []byte {
 func createComQuery(query string) []byte {
 	var off int
 
-	payloadLength := 1 + // comQuery
+	payloadLength := 1 + // _COM_QUERY
 		len(query) // length of query
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comQuery
+	b[off] = _COM_QUERY
 	off++
 
 	off += copy(b[off:], query)
@@ -203,7 +202,7 @@ func createComQuery(query string) []byte {
 func createComFieldList(table, fieldWildcard string) []byte {
 	var off int
 
-	payloadLength := 1 + // comFieldList
+	payloadLength := 1 + // _COM_FIELD_LIST
 		len(table) + // length of table name
 		1 + // NULL
 		len(fieldWildcard) // length of field wildcard
@@ -211,7 +210,7 @@ func createComFieldList(table, fieldWildcard string) []byte {
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comFieldList
+	b[off] = _COM_FIELD_LIST
 	off++
 
 	off += copy(b[off:], table)
@@ -226,13 +225,13 @@ func createComFieldList(table, fieldWildcard string) []byte {
 func createComCreateDb(schema string) []byte {
 	var off int
 
-	payloadLength := 1 + // comCreateDb
+	payloadLength := 1 + // _COM_CREATE_DB
 		len(schema) // length of schema name
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comCreateDb
+	b[off] = _COM_CREATE_DB
 	off++
 
 	off += copy(b[off:], schema)
@@ -243,43 +242,42 @@ func createComCreateDb(schema string) []byte {
 func createComDropDb(schema string) []byte {
 	var off int
 
-	payloadLength := 1 + // comDropDb
+	payloadLength := 1 + // _COM_DROP_DB
 		len(schema) // length of schema name
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comDropDb
+	b[off] = _COM_DROP_DB
 	off++
 
 	off += copy(b[off:], schema)
 	return b
 }
 
-type MyRefreshOption uint8
-
+// refresh flags (exported)
 const (
-	RefreshGrant   MyRefreshOption = 0x01
-	RefreshLog     MyRefreshOption = 0x02
-	RefreshTables  MyRefreshOption = 0x04
-	RefreshHosts   MyRefreshOption = 0x08
-	RefreshStatus  MyRefreshOption = 0x10
-	RefreshSlave   MyRefreshOption = 0x20
-	RefreshThreads MyRefreshOption = 0x40
-	RefreshMaster  MyRefreshOption = 0x80
+	REFRESH_GRANT   = 0x01
+	REFRESH_LOG     = 0x02
+	REFRESH_TABLES  = 0x04
+	REFRESH_HOSTS   = 0x08
+	REFRESH_STATUS  = 0x10
+	REFRESH_SLAVE   = 0x20
+	REFRESH_THREADS = 0x40
+	REFRESH_MASTER  = 0x80
 )
 
 // createComRefresh generates COM_REFRESH packet.
 func createComRefresh(subCommand uint8) []byte {
 	var off int
 
-	payloadLength := 1 + // comRefresh
+	payloadLength := 1 + // _COM_REFRESH
 		1 // subCommand length
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comRefresh
+	b[off] = _COM_REFRESH
 	off++
 	b[off] = subCommand
 	off++
@@ -288,28 +286,29 @@ func createComRefresh(subCommand uint8) []byte {
 
 type MyShutdownLevel uint8
 
+// shutdown flags (exported)
 const (
-	ShutdownDefault             MyShutdownLevel = 0x00
-	ShutdownWaitConnections     MyShutdownLevel = 0x01
-	ShutdownWaitTransactions    MyShutdownLevel = 0x02
-	ShutdownWaitUpdates         MyShutdownLevel = 0x08
-	ShutdownWaitAllBuffers      MyShutdownLevel = 0x10
-	ShutdownWaitCriticalBuffers MyShutdownLevel = 0x11
-	KillQuery                   MyShutdownLevel = 0xfe
-	KillConnections             MyShutdownLevel = 0xff
+	SHUTDOWN_DEFAULT               MyShutdownLevel = 0x00
+	SHUTDOWN_WAIT_CONNECTIONS      MyShutdownLevel = 0x01
+	SHUTDOWN_WAIT_TRANSACTIONS     MyShutdownLevel = 0x02
+	SHUTDOWN_WAIT__UPDATES         MyShutdownLevel = 0x08
+	SHUTDOWN_WAIT_ALL_BUFFERS      MyShutdownLevel = 0x10
+	SHUTDOWN_WAIT_CRITICAL_BUFFERS MyShutdownLevel = 0x11
+	SHUTDOWN_KILL_QUERY            MyShutdownLevel = 0xfe
+	SHUTDOWN_KILL_CONNECTIONS      MyShutdownLevel = 0xff
 )
 
 // createComShutdown generates COM_SHUTDOWN packet.
 func createComShutdown(level MyShutdownLevel) []byte {
 	var off int
 
-	payloadLength := 1 + // comShutdown
+	payloadLength := 1 + // _COM_SHUTDOWN
 		1 // shutdown level length
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comShutdown
+	b[off] = _COM_SHUTDOWN
 	off++
 	b[off] = byte(level)
 	off++
@@ -320,12 +319,12 @@ func createComShutdown(level MyShutdownLevel) []byte {
 func createComStatistics() []byte {
 	var off int
 
-	payloadLength := 1 // comStatistics
+	payloadLength := 1 // _COM_STATISTICS
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comStatistics
+	b[off] = _COM_STATISTICS
 	off++
 
 	return b
@@ -335,12 +334,12 @@ func createComStatistics() []byte {
 func createComProcessInfo() []byte {
 	var off int
 
-	payloadLength := 1 // comProcessInfo
+	payloadLength := 1 // _COM_PROCESS_INFO
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comProcessInfo
+	b[off] = _COM_PROCESS_INFO
 	return b
 }
 
@@ -423,17 +422,16 @@ func (c *Conn) handleExecResponse() (*Result, error) {
 
 	switch b[0] {
 
-	case errPacket: // expected
+	case _PACKET_ERR: // expected
 		// handle err packet
 		c.parseErrPacket(b)
 		return nil, &c.e
 
-	case okPacket: // expected
+	case _PACKET_OK: // expected
 		// parse Ok packet and break
 		c.parseOkPacket(b)
-		break
 
-	case infileReqPacket: // expected
+	case _PACKET_INFILE_REQ: // expected
 		// local infile request; handle it
 		if err = c.handleInfileRequest(string(b[1:])); err != nil {
 			return nil, err
@@ -463,18 +461,18 @@ func (c *Conn) handleQueryResponse() (*Rows, error) {
 	}
 
 	switch b[0] {
-	case errPacket: // expected
+	case _PACKET_ERR: // expected
 		// handle err packet
 		c.parseErrPacket(b)
 		return nil, &c.e
 
-	case okPacket: // unexpected!
+	case _PACKET_OK: // unexpected!
 		// the command resulted in a Result (anti-pattern ?); but
 		// since it succeeded we handle it and return nil.
 		c.parseOkPacket(b)
 		return nil, nil
 
-	case infileReqPacket: // unexpected!
+	case _PACKET_INFILE_REQ: // unexpected!
 		// local infile request; handle it and return nil
 		if err = c.handleInfileRequest(string(b[1:])); err != nil {
 			return nil, err
@@ -528,9 +526,9 @@ func (c *Conn) handleResultSet(columnCount uint16) (*Rows, error) {
 		}
 
 		switch b[0] {
-		case eofPacket:
+		case _PACKET_EOF:
 			done = true
-		case errPacket:
+		case _PACKET_ERR:
 			c.parseErrPacket(b)
 			return nil, &c.e
 		default: // result set row
@@ -661,12 +659,12 @@ L:
 	}
 
 	switch b[0] {
-	case errPacket:
+	case _PACKET_ERR:
 		// handle err packet
 		c.parseErrPacket(b)
 		return &c.e
 
-	case okPacket:
+	case _PACKET_OK:
 		// parse Ok packet
 		c.parseOkPacket(b)
 

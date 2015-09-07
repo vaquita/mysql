@@ -13,13 +13,13 @@ func createComStmtPrepare(query string) []byte {
 		off int
 	)
 
-	payloadLength := 1 + // comStmtPrepare
+	payloadLength := 1 + // _COM_STMT_PREPARE
 		len(query) // length of query
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comStmtPrepare
+	b[off] = _COM_STMT_PREPARE
 	off++
 
 	off += copy(b[off:], query)
@@ -44,7 +44,7 @@ func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
 	b := make([]byte, 4+comStmtExecutePayloadLength(s, args))
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comStmtExecute
+	b[off] = _COM_STMT_EXECUTE
 	off++
 
 	binary.LittleEndian.PutUint32(b[off:off+4], s.id)
@@ -70,17 +70,17 @@ func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
 			for i := 0; i < int(s.paramCount); i++ {
 				switch v := args[i].(type) {
 				case int64:
-					binary.LittleEndian.PutUint16(b[poff:poff+2], uint16(mysqlTypeLongLong))
+					binary.LittleEndian.PutUint16(b[poff:poff+2], uint16(_TYPE_LONG_LONG))
 					poff += 2
 					off += writeUint64(b[off:], uint64(v))
 				case float64:
 					binary.LittleEndian.PutUint16(b[poff:poff+2],
-						uint16(mysqlTypeDouble))
+						uint16(_TYPE_DOUBLE))
 					poff += 2
 					off += writeDouble(b[off:], v)
 				case bool:
 					binary.LittleEndian.PutUint16(b[poff:poff+2],
-						uint16(mysqlTypeTiny))
+						uint16(_TYPE_TINY))
 					poff += 2
 					value := uint8(0)
 					if v == true {
@@ -89,22 +89,22 @@ func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
 					off += writeUint8(b[off:], value)
 				case []byte:
 					binary.LittleEndian.PutUint16(b[poff:poff+2],
-						uint16(mysqlTypeBlob))
+						uint16(_TYPE_BLOB))
 					poff += 2
 					off += writeString(b[off:], string(v))
 				case string:
 					binary.LittleEndian.PutUint16(b[poff:poff+2],
-						uint16(mysqlTypeVarchar))
+						uint16(_TYPE_VARCHAR))
 					poff += 2
 					off += writeString(b[off:], v)
 				case time.Time:
 					binary.LittleEndian.PutUint16(b[poff:poff+2],
-						uint16(mysqlTypeTimestamp))
+						uint16(_TYPE_TIMESTAMP))
 					poff += 2
 					off += writeDate(b[off:], v)
 				case nil:
 					binary.LittleEndian.PutUint16(b[poff:poff+2],
-						uint16(mysqlTypeNull))
+						uint16(_TYPE_NULL))
 					poff += 2
 					// set the corresponding null bit
 					nullBitmap[int(i/8)] |= 1 << uint(i%8)
@@ -122,12 +122,12 @@ func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
 func createComStmtClose(sid uint32) []byte {
 	var off int
 
-	payloadLength := 5 // comStmtClose(1) + s.id(4)
+	payloadLength := 5 // _COM_STMT_CLOSE(1) + s.id(4)
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comStmtClose
+	b[off] = _COM_STMT_CLOSE
 	off++
 
 	binary.LittleEndian.PutUint32(b[off:off+4], sid)
@@ -140,12 +140,12 @@ func createComStmtClose(sid uint32) []byte {
 func createComStmtReset(s *Stmt) []byte {
 	var off int
 
-	payloadLength := 5 // comStmtReset (1) + s.id (4)
+	payloadLength := 5 // _COM_STMT_RESET (1) + s.id (4)
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comStmtReset
+	b[off] = _COM_STMT_RESET
 	off++
 
 	binary.LittleEndian.PutUint32(b[off:off+4], s.id)
@@ -158,13 +158,13 @@ func createComStmtReset(s *Stmt) []byte {
 func createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) []byte {
 	var off int
 
-	payloadLength := 7 + // comStmtSendLongData(1) + s.id(4) + paramId(2)
+	payloadLength := 7 + // _COM_STMT_SEND_LONG_DATA(1) + s.id(4) + paramId(2)
 		len(data) // length of data
 
 	b := make([]byte, 4+payloadLength)
 	off += 4 // placeholder for protocol packet header
 
-	b[off] = comStmtSendLongData
+	b[off] = _COM_STMT_SEND_LONG_DATA
 	off++
 
 	binary.LittleEndian.PutUint32(b[off:off+4], s.id)
@@ -204,9 +204,9 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 	}
 
 	switch b[0] {
-	case okPacket: // COM_STMT_PREPARE_OK packet
+	case _PACKET_OK: // COM_STMT_PREPARE_OK packet
 		s.parseStmtPrepareOkPacket(b)
-	case errPacket:
+	case _PACKET_ERR:
 		c.parseErrPacket(b)
 		err = &c.e
 		return
@@ -220,7 +220,7 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 			return
 		}
 		switch b[0] {
-		case eofPacket: // EOF packet, done!
+		case _PACKET_EOF: // EOF packet, done!
 			c.parseEOFPacket(b)
 			more = false
 		default: // column definition packet
@@ -235,7 +235,7 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 			return
 		}
 		switch b[0] {
-		case eofPacket: // EOF packet, done!
+		case _PACKET_EOF: // EOF packet, done!
 			c.parseEOFPacket(b)
 			more = false
 		default: // column definition packet
@@ -298,7 +298,7 @@ func (s *Stmt) handleQuery(args []driver.Value) (*Rows, error) {
 // comStmtExecutePayloadLength returns the payload size of COM_STMT_EXECUTE
 // packet.
 func comStmtExecutePayloadLength(s *Stmt, args []driver.Value) (length uint64) {
-	length = 1 + //comStmtPrepare
+	length = 1 + //_COM_STMT_PREPARE
 		9 // id(4) + flags(1) + iterationCount(4)
 
 	if s.paramCount > 0 {
@@ -346,17 +346,17 @@ func (s *Stmt) handleExecResponse() (*Result, error) {
 
 	switch b[0] {
 
-	case errPacket: // expected
+	case _PACKET_ERR: // expected
 		// handle err packet
 		c.parseErrPacket(b)
 		return nil, &c.e
 
-	case okPacket: // expected
+	case _PACKET_OK: // expected
 		// parse Ok packet and break
 		c.parseOkPacket(b)
 		break
 
-	case infileReqPacket: // expected
+	case _PACKET_INFILE_REQ: // expected
 		// local infile request; handle it
 		if err = c.handleInfileRequest(string(b[1:])); err != nil {
 			return nil, err
@@ -388,18 +388,18 @@ func (s *Stmt) handleQueryResponse() (*Rows, error) {
 	}
 
 	switch b[0] {
-	case errPacket: // expected
+	case _PACKET_ERR: // expected
 		// handle err packet
 		c.parseErrPacket(b)
 		return nil, &c.e
 
-	case okPacket: // unexpected!
+	case _PACKET_OK: // unexpected!
 		// the command resulted in a Result (anti-pattern ?); but
 		// since it succeeded we handle it and return nil.
 		c.parseOkPacket(b)
 		return nil, nil
 
-	case infileReqPacket: // unexpected!
+	case _PACKET_INFILE_REQ: // unexpected!
 		// local infile request; handle it and return nil
 		if err = c.handleInfileRequest(string(b[1:])); err != nil {
 			return nil, err
@@ -453,9 +453,9 @@ func (c *Conn) handleBinaryResultSet(columnCount uint16) (*Rows, error) {
 		}
 
 		switch b[0] {
-		case eofPacket:
+		case _PACKET_EOF:
 			done = true
-		case errPacket:
+		case _PACKET_ERR:
 			c.parseErrPacket(b)
 			return nil, &c.e
 		default: // result set row
@@ -489,64 +489,64 @@ func (c *Conn) handleBinaryResultSetRow(b []byte, rs *Rows) *row {
 		} else {
 			switch rs.columnDefs[i].columnType {
 			// string
-			case mysqlTypeString, mysqlTypeVarchar,
-				mysqlTypeVarString, mysqlTypeEnum,
-				mysqlTypeSet, mysqlTypeBlob,
-				mysqlTypeTinyBlob, mysqlTypeMediumBlob,
-				mysqlTypeLongBlob, mysqlTypeGeometry,
-				mysqlTypeBit, mysqlTypeDecimal,
-				mysqlTypeNewDecimal:
+			case _TYPE_STRING, _TYPE_VARCHAR,
+				_TYPE_VARSTRING, _TYPE_ENUM,
+				_TYPE_SET, _TYPE_BLOB,
+				_TYPE_TINY_BLOB, _TYPE_MEDIUM_BLOB,
+				_TYPE_LONG_BLOB, _TYPE_GEOMETRY,
+				_TYPE_BIT, _TYPE_DECIMAL,
+				_TYPE_NEW_DECIMAL:
 				v, n := parseString(b[off:])
 				r.columns = append(r.columns, v)
 				off += n
 
 			// uint64
-			case mysqlTypeLongLong:
+			case _TYPE_LONG_LONG:
 				r.columns = append(r.columns, parseUint64(b[off:off+8]))
 				off += 8
 
 			// uint32
-			case mysqlTypeLong, mysqlTypeInt24:
+			case _TYPE_LONG, _TYPE_INT24:
 				r.columns = append(r.columns, parseUint32(b[off:off+4]))
 				off += 4
 
 			// uint16
-			case mysqlTypeShort, mysqlTypeYear:
+			case _TYPE_SHORT, _TYPE_YEAR:
 				r.columns = append(r.columns, parseUint16(b[off:off+2]))
 				off += 2
 
 			// uint8
-			case mysqlTypeTiny:
+			case _TYPE_TINY:
 				r.columns = append(r.columns, parseUint8(b[off:off+1]))
 				off++
 
 			// float64
-			case mysqlTypeDouble:
+			case _TYPE_DOUBLE:
 				r.columns = append(r.columns, parseDouble(b[off:off+8]))
 				off += 8
 
 			// float32
-			case mysqlTypeFloat:
+			case _TYPE_FLOAT:
 				r.columns = append(r.columns, parseFloat(b[off:off+4]))
 				off += 4
 
 			// time.Time
-			case mysqlTypeDate, mysqlTypeDateTime,
-				mysqlTypeTimestamp:
+			case _TYPE_DATE, _TYPE_DATETIME,
+				_TYPE_TIMESTAMP:
 				v, n := parseDate(b[off:])
 				r.columns = append(r.columns, v)
 				off += n
 
 			// time.Duration
-			case mysqlTypeTime:
+			case _TYPE_TIME:
 				v, n := parseTime(b[off:])
 				r.columns = append(r.columns, v)
 				off += n
 
 			// TODO: map the following unhandled types accordingly
-			case mysqlTypeNewDate, mysqlTypeTimeStamp2,
-				mysqlTypeDateTime2, mysqlTypeTime2,
-				mysqlTypeNull:
+			case _TYPE_NEW_DATE, _TYPE_TIMESTAMP2,
+				_TYPE_DATETIME2, _TYPE_TIME2,
+				_TYPE_NULL:
 				fallthrough
 			default:
 			}
@@ -567,77 +567,42 @@ func isNull(bitmap []byte, pos uint16) bool {
 	return false // not null
 }
 
-// mysql data types
+// mysql data types (unexported)
 const (
-	mysqlTypeDecimal = iota
-	mysqlTypeTiny
-	mysqlTypeShort
-	mysqlTypeLong
-	mysqlTypeFloat
-	mysqlTypeDouble
-	mysqlTypeNull
-	mysqlTypeTimestamp
-	mysqlTypeLongLong
-	mysqlTypeInt24
-	mysqlTypeDate
-	mysqlTypeTime
-	mysqlTypeDateTime
-	mysqlTypeYear
-	mysqlTypeNewDate
-	mysqlTypeVarchar
-	mysqlTypeBit
-	mysqlTypeTimeStamp2
-	mysqlTypeDateTime2
-	mysqlTypeTime2
+	_TYPE_DECIMAL = iota
+	_TYPE_TINY
+	_TYPE_SHORT
+	_TYPE_LONG
+	_TYPE_FLOAT
+	_TYPE_DOUBLE
+	_TYPE_NULL
+	_TYPE_TIMESTAMP
+	_TYPE_LONG_LONG
+	_TYPE_INT24
+	_TYPE_DATE
+	_TYPE_TIME
+	_TYPE_DATETIME
+	_TYPE_YEAR
+	_TYPE_NEW_DATE
+	_TYPE_VARCHAR
+	_TYPE_BIT
+	_TYPE_TIMESTAMP2
+	_TYPE_DATETIME2
+	_TYPE_TIME2
 	// ...
-	mysqlTypeNewDecimal = 246
-	mysqlTypeEnum       = 247
-	mysqlTypeSet        = 248
-	mysqlTypeTinyBlob   = 249
-	mysqlTypeMediumBlob = 250
-	mysqlTypeLongBlob   = 251
-	mysqlTypeBlob       = 252
-	mysqlTypeVarString  = 253
-	mysqlTypeString     = 254
-	mysqlTypeGeometry   = 255
+	_TYPE_NEW_DECIMAL = 246
+	_TYPE_ENUM        = 247
+	_TYPE_SET         = 248
+	_TYPE_TINY_BLOB   = 249
+	_TYPE_MEDIUM_BLOB = 250
+	_TYPE_LONG_BLOB   = 251
+	_TYPE_BLOB        = 252
+	_TYPE_VARSTRING   = 253
+	_TYPE_STRING      = 254
+	_TYPE_GEOMETRY    = 255
 )
 
 // <!-- binary protocol value -->
-
-/*
-  MySQL - Go type mapping
-  -----------------------
-  MYSQL_TYPE_DECIMAL
-  MYSQL_TYPE_TINY
-  MYSQL_TYPE_SHORT
-  MYSQL_TYPE_LONG
-  MYSQL_TYPE_FLOAT
-  MYSQL_TYPE_DOUBLE
-  MYSQL_TYPE_NULL
-  MYSQL_TYPE_TIMESTAMP
-  MYSQL_TYPE_LONGLONG
-  MYSQL_TYPE_INT24
-  MYSQL_TYPE_DATE
-  MYSQL_TYPE_TIME
-  MYSQL_TYPE_DATETIME
-  MYSQL_TYPE_YEAR
-  MYSQL_TYPE_NEWDATE
-  MYSQL_TYPE_VARCHAR
-  MYSQL_TYPE_BIT
-  MYSQL_TYPE_TIMESTAMP2
-  MYSQL_TYPE_DATETIME2
-  MYSQL_TYPE_TIME2
-  MYSQL_TYPE_NEWDECIMAL
-  MYSQL_TYPE_ENUM
-  MYSQL_TYPE_SET
-  MYSQL_TYPE_TINY_BLOB
-  MYSQL_TYPE_MEDIUM_BLOB
-  MYSQL_TYPE_LONG_BLOB
-  MYSQL_TYPE_BLOB
-  MYSQL_TYPE_VAR_STRING
-  MYSQL_TYPE_STRING
-  MYSQL_TYPE_GEOMETRY
-*/
 
 func parseString(b []byte) (string, int) {
 	v, n := getLenencString(b)

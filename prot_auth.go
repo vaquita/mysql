@@ -46,7 +46,7 @@ func (c *Conn) parseGreetingPacket(b []byte) {
 		c.serverCapabilities |= (uint32(binary.LittleEndian.Uint16(b[off:off+2])) << 16)
 		off += 2
 
-		if (c.serverCapabilities & clientPluginAuth) != 0 {
+		if (c.serverCapabilities & _CLIENT_PLUGIN_AUTH) != 0 {
 			// update the auth plugin data length
 			authDataLength = int(b[off])
 			off++
@@ -56,7 +56,7 @@ func (c *Conn) parseGreetingPacket(b []byte) {
 
 		off += 10 // reserved (all [00])
 
-		if (c.serverCapabilities & clientSecureConnection) != 0 {
+		if (c.serverCapabilities & _CLIENT_SECURE_CONNECTION) != 0 {
 			// auth-plugin-data-part-2 : note the offset & update
 			// the length (max(13, authDataLength- 8)
 			if (authDataLength - 8) > 13 {
@@ -74,7 +74,7 @@ func (c *Conn) parseGreetingPacket(b []byte) {
 
 		c.authPluginData = authData
 
-		if (c.serverCapabilities & clientPluginAuth) != 0 {
+		if (c.serverCapabilities & _CLIENT_PLUGIN_AUTH) != 0 {
 			// auth-plugin name (null-terminated)
 			c.authPluginName, n = getNullTerminatedString(b[off:])
 			off += n
@@ -148,9 +148,9 @@ func (c *Conn) populateHandshakeResponse2(b []byte, authData []byte) int {
 
 	off += putNullTerminatedString(b[off:], c.p.username)
 
-	if (c.serverCapabilities & clientPluginAuthLenencClientData) != 0 {
+	if (c.serverCapabilities & _CLIENT_PLUGIN_AUTH_LENENC_CLIENT_DATA) != 0 {
 		off += putLenencString(b[off:], string(authData))
-	} else if (c.serverCapabilities & clientSecureConnection) != 0 {
+	} else if (c.serverCapabilities & _CLIENT_SECURE_CONNECTION) != 0 {
 		b[off] = byte(len(authData))
 		off++
 		off += copy(b[off:], authData)
@@ -158,15 +158,15 @@ func (c *Conn) populateHandshakeResponse2(b []byte, authData []byte) int {
 		off += putNullTerminatedString(b[off:], string(authData))
 	}
 
-	if (c.p.schema != "") && ((c.serverCapabilities & clientConnectWithDb) != 0) {
+	if (c.p.schema != "") && ((c.serverCapabilities & _CLIENT_CONNECT_WITH_DB) != 0) {
 		off += putNullTerminatedString(b[off:], c.p.schema)
 	}
 
-	if (c.serverCapabilities & clientPluginAuth) != 0 {
+	if (c.serverCapabilities & _CLIENT_PLUGIN_AUTH) != 0 {
 		off += putNullTerminatedString(b[off:], c.authPluginName)
 	}
 
-	if (c.serverCapabilities & clientConnectAttrs) != 0 {
+	if (c.serverCapabilities & _CLIENT_CONNECT_ATTRS) != 0 {
 		// TODO: handle connection attributes
 	}
 	return off
@@ -178,15 +178,15 @@ func (c *Conn) handshakeResponse2Length(authLength int) (length int) {
 	length += (len(c.p.username) + 1) // null-terminated username
 	length += authLength
 
-	if (c.serverCapabilities & clientConnectWithDb) != 0 {
+	if (c.serverCapabilities & _CLIENT_CONNECT_WITH_DB) != 0 {
 		length += (len(c.p.schema) + 1) // null-terminated schema name
 	}
 
-	if (c.serverCapabilities & clientPluginAuth) != 0 {
+	if (c.serverCapabilities & _CLIENT_PLUGIN_AUTH) != 0 {
 		length += (len(c.authPluginName) + 1) // null-terminated authentication plugin name
 	}
 
-	if (c.serverCapabilities & clientConnectAttrs) != 0 {
+	if (c.serverCapabilities & _CLIENT_CONNECT_ATTRS) != 0 {
 		// TODO: handle connection attributes
 	}
 	return
@@ -208,8 +208,8 @@ func (c *Conn) handshake() (err error) {
 
 	// note : server capabilities can only be checked after receiving the
 	// "greeting" packet
-	if c.p.clientCapabilities&clientSSL != 0 {
-		if c.serverCapabilities&clientSSL == 0 {
+	if c.p.clientCapabilities&_CLIENT_SSL != 0 {
+		if c.serverCapabilities&_CLIENT_SSL == 0 {
 			// error: client requested for SSL but server doesn't
 			// support SSL.
 			return errors.New("mysql: server does not support SSL connection")
@@ -218,8 +218,8 @@ func (c *Conn) handshake() (err error) {
 		}
 	}
 
-	if c.p.clientCapabilities&clientCompress != 0 {
-		if c.serverCapabilities&clientCompress == 0 {
+	if c.p.clientCapabilities&_CLIENT_COMPRESS != 0 {
+		if c.serverCapabilities&_CLIENT_COMPRESS == 0 {
 			// error: client requested for packet compression but server doesn't
 			// support compression protocol.
 			return errors.New("mysql: server does not support packet compression")
@@ -259,10 +259,10 @@ func (c *Conn) handshake() (err error) {
 	}
 
 	switch b[0] {
-	case errPacket:
+	case _PACKET_ERR:
 		c.parseErrPacket(b)
 		return &c.e
-	case okPacket:
+	case _PACKET_OK:
 		c.parseOkPacket(b)
 	default:
 		// TODO: invalid packet
