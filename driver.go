@@ -3,6 +3,7 @@ package mysql
 import (
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 )
 
 type Driver struct {
@@ -14,24 +15,19 @@ func init() {
 }
 
 func (d Driver) Open(dsn string) (driver.Conn, error) {
-	var err error
-
-	c := &Conn{}
-	c.rw = &defaultReadWriter{}
+	var (
+		err error
+		p   properties
+	)
 
 	// parse the dsn
-	if err = c.p.parseUrl(dsn); err != nil {
+	if err = p.parseUrl(dsn); err != nil {
 		return nil, err
 	}
 
-	// open a connection with the server
-	if c.conn, err = dial(c.p.address, c.p.socket); err != nil {
-		return nil, err
+	if p.scheme != "mysql" {
+		return nil, errors.New("mysql: invalid url scheme")
 	}
 
-	// perform handshake
-	if err = c.handshake(); err != nil {
-		return nil, err
-	}
-	return c, nil
+	return open(p)
 }

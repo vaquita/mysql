@@ -3,6 +3,8 @@ package mysql
 import (
 	"encoding/binary"
 	"errors"
+	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -944,4 +946,142 @@ func (b *Binlog) parseGtidListEvent(buf []byte, ev *GtidListEvent) {
 	}
 
 	return
+}
+
+type fileReader struct {
+	name      string
+	file      *os.File
+	closed    bool
+	first     bool
+	eof       bool
+	nextEvent []byte
+}
+
+func (fr *fileReader) begin(index binlogIndex) error {
+	var err error
+
+	if index.file != "" && index.file != fr.name {
+		fr.name = index.file
+
+		// close the previously opened file
+		if !fr.closed {
+			if err = fr.close(); err != nil {
+				return err
+			}
+		}
+		// open the new file
+		if fr.file, err = os.Open(fr.name); err != nil {
+			return nil
+		}
+		fr.closed = false
+	}
+
+	if index.position > 0 {
+		if _, err = fr.file.Seek(int64(index.position), 0); err != nil {
+			// seek operation failed
+			return err
+		}
+	}
+
+	// read and verify magic number
+	magic := make([]byte, 4)
+	if _, err = fr.file.Read(magic); err != nil {
+		return err
+
+	} else {
+		// TODO: verify magic number [0xfe, 'b', 'i', 'n']
+	}
+	if err = fr.readEvent(); err != nil {
+		return err
+	}
+
+	fr.first = true
+	return nil
+}
+
+func (fr *fileReader) close() error {
+	var err error
+
+	if !fr.closed {
+		if err = fr.file.Close(); err != nil {
+			// file close operation failed
+			return nil
+		}
+	}
+	fr.closed = true
+	return nil
+}
+
+func (fr *fileReader) next() bool {
+	var err error
+
+	if fr.eof {
+		return false
+	}
+
+	if fr.first { // first event has already been read
+		fr.first = false
+	} else if err = fr.readEvent(); err != nil { // read the next event
+		fr.eof = true
+		// TODO: save error
+		return false
+	}
+	return true
+}
+
+func (fr *fileReader) event() []byte {
+	return fr.nextEvent
+}
+
+func (fr *fileReader) init(p properties) error {
+	var err error
+	fr.name = p.file
+	if fr.file, err = os.Open(fr.name); err != nil {
+		fr.closed = true
+		return err
+	}
+	fr.closed = false
+	return nil
+}
+
+func (fr *fileReader) readEvent() error {
+	var (
+		err                          error
+		headerBuf, bodyBuf, eventBuf []byte
+		header                       eventHeader
+	)
+
+	// read the binlog header
+	headerBuf = make([]byte, 19)
+	_, err = fr.file.Read(headerBuf)
+	if err != nil {
+		if err == io.EOF {
+			fr.eof = true
+			return nil
+		} else {
+			return err
+		}
+	}
+
+	header, _ = parseEventHeader(headerBuf)
+
+	// read the event body
+	bodyBuf = make([]byte, header.size-19)
+	_, err = fr.file.Read(bodyBuf)
+	if err != nil {
+		if err == io.EOF {
+			fr.eof = true
+			return nil
+		} else {
+			return err
+		}
+	}
+
+	// combine both the buffers
+	eventBuf = make([]byte, header.size)
+	copy(eventBuf, headerBuf)
+	copy(eventBuf[19:], bodyBuf)
+
+	fr.nextEvent = eventBuf
+	return nil
 }

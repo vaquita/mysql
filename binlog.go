@@ -111,6 +111,14 @@ func (b *Binlog) Connect(dsn string) error {
 			b.reader = nr
 		}
 
+	case "file":
+		fr := new(fileReader)
+		if err = fr.init(p); err != nil {
+			return err
+		} else {
+			b.reader = fr
+		}
+
 	default:
 		err = errors.New("mysql: invalid url scheme")
 		return err
