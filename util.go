@@ -4,11 +4,44 @@ import (
 	"encoding/binary"
 )
 
-// getUint24 converts 3-byte byte slice into little-endian uint32
+// getUint24 converts 3-byte byte little-endian slice into uint32
 func getUint24(b []byte) uint32 {
 	return uint32(b[0]) |
 		uint32(b[1]<<8) |
 		uint32(b[2]<<16)
+}
+
+// getUint48 converts 6-byte byte little-endian slice into uint64
+func getUint48(b []byte) uint64 {
+	return uint64(b[0]) |
+		uint64(b[1]<<8) |
+		uint64(b[2]<<16) |
+		uint64(b[3]<<16) |
+		uint64(b[4]<<16) |
+		uint64(b[5]<<16)
+}
+
+func getInt16(b []byte) int16 {
+	return int16(b[0]) |
+		int16(b[1])
+}
+
+func getInt32(b []byte) int32 {
+	return int32(b[0]) |
+		int32(b[1]) |
+		int32(b[2]) |
+		int32(b[3])
+}
+
+func getInt64(b []byte) int64 {
+	return int64(b[0]) |
+		int64(b[1]) |
+		int64(b[2]) |
+		int64(b[3]) |
+		int64(b[4]) |
+		int64(b[5]) |
+		int64(b[6]) |
+		int64(b[7])
 }
 
 // putUint24 stores the given uint32 into the specified 3-byte byte slice in little-endian
@@ -18,8 +51,8 @@ func putUint24(b []byte, v uint32) {
 	b[2] = byte(v >> 16)
 }
 
-// setLenencInt retrieves the number from the specified buffer stored in
-// length-encoded integer format and returns the number of bytes written.
+// getLenencInt retrieves the number from the specified buffer stored in
+// length-encoded integer format and returns the number of bytes read.
 func getLenencInt(b []byte) (v uint64, n int) {
 	first := b[0]
 
@@ -123,4 +156,30 @@ func putNullTerminatedString(b []byte, v string) (n int) {
 	n = copy(b, v)
 	n++ // null terminator
 	return
+}
+
+// isNull returns whether the column at the given position is NULL; the first
+// column's position is 0.
+func isNull(bitmap []byte, pos, offset uint16) bool {
+	// for binary protocol, result set row offset = 2
+	pos += offset
+
+	if (bitmap[pos/8] & (1 << (pos % 8))) != 0 {
+		return true // null
+	}
+	return false // not null
+}
+
+// setBitCount returns the number of bits set in the given bitmap.
+func setBitCount(bitmap []byte) uint16 {
+	var count, i, j uint16
+
+	for i = 0; i < uint16(len(bitmap)); i++ {
+		for j = 0; j < 8; j++ {
+			if ((bitmap[i] >> j) & 0x01) == 1 {
+				count++
+			}
+		}
+	}
+	return count
 }

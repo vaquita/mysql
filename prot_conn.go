@@ -33,6 +33,26 @@ type Conn struct {
 	clientCharset uint8
 }
 
+func open(p properties) (*Conn, error) {
+	var err error
+
+	c := &Conn{}
+	c.rw = &defaultReadWriter{}
+	c.p = p
+
+	// open a connection with the server
+	if c.conn, err = dial(p.address, p.socket); err != nil {
+		return nil, err
+	}
+
+	// perform handshake
+	if err = c.handshake(); err != nil {
+		return nil, err
+	}
+
+	return c, nil
+}
+
 // readPacket reads the next protocol packet from the network and returns the
 // payload after increment the packet sequence number.
 func (c *Conn) readPacket() ([]byte, error) {

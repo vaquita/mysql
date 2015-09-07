@@ -484,7 +484,7 @@ func (c *Conn) handleBinaryResultSetRow(b []byte, rs *Rows) *row {
 	off += nullBitmapSize
 
 	for i := uint16(0); i < columnCount; i++ {
-		if isNull(nullBitmap, i) == true {
+		if isNull(nullBitmap, i, 2) == true {
 			r.columns = append(r.columns, nil)
 		} else {
 			switch rs.columnDefs[i].columnType {
@@ -555,18 +555,6 @@ func (c *Conn) handleBinaryResultSetRow(b []byte, rs *Rows) *row {
 	return r
 }
 
-// isNull returns whether the column at the given position is NULL; the first
-// column's position is 0.
-func isNull(bitmap []byte, pos uint16) bool {
-	// for binary protocol, result set row offset = 2
-	pos += 2
-
-	if (bitmap[pos/8] & (1 << (pos % 8))) != 0 {
-		return true // null
-	}
-	return false // not null
-}
-
 // mysql data types (unexported)
 const (
 	_TYPE_DECIMAL = iota
@@ -623,6 +611,22 @@ func parseUint16(b []byte) uint16 {
 
 func parseUint8(b []byte) uint8 {
 	return uint8(b[0])
+}
+
+func parseInt64(b []byte) int64 {
+	return getInt64(b[:8])
+}
+
+func parseInt32(b []byte) int32 {
+	return getInt32(b[:4])
+}
+
+func parseInt16(b []byte) int16 {
+	return getInt16(b[:2])
+}
+
+func parseInt8(b []byte) int8 {
+	return int8(b[0])
 }
 
 func parseDouble(b []byte) float64 {

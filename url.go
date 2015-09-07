@@ -22,6 +22,8 @@ const (
 )
 
 type properties struct {
+	scheme             string // mysql or file (for binlog files)
+	file               string // file://<binlog file>
 	username           string
 	password           string
 	passwordSet        bool
@@ -34,6 +36,8 @@ type properties struct {
 	sslCA   string
 	sslCert string
 	sslKey  string
+
+	slaveId uint32 // used while registering as slave
 }
 
 func (p *properties) parseUrl(dsn string) error {
@@ -43,6 +47,13 @@ func (p *properties) parseUrl(dsn string) error {
 	u, err := url.Parse(dsn)
 	if err != nil {
 		return err
+	}
+
+	p.scheme = u.Scheme
+
+	if p.scheme == "file" {
+		p.file = u.Path
+		return nil
 	}
 
 	if u.User != nil {
@@ -106,6 +117,17 @@ func (p *properties) parseUrl(dsn string) error {
 		} else if v {
 			p.clientCapabilities |= _CLIENT_COMPRESS
 		}
+	}
+
+	// SlaveId
+	if val := query.Get("SlaveId"); val != "" {
+		if v, err := strconv.ParseUint(val, 10, 32); err != nil {
+			return err
+		} else {
+			p.slaveId = uint32(v)
+		}
+	} else {
+		p.slaveId = _DEFAULT_SLAVE_ID
 	}
 
 	return nil
