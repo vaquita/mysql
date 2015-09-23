@@ -37,7 +37,8 @@ type properties struct {
 	sslCert string
 	sslKey  string
 
-	slaveId uint32 // used while registering as slave
+	slaveId        uint32 // used while registering as slave
+	reportWarnings bool   // report warnings count as error
 }
 
 func (p *properties) parseUrl(dsn string) error {
@@ -130,6 +131,14 @@ func (p *properties) parseUrl(dsn string) error {
 		p.slaveId = _DEFAULT_SLAVE_ID
 	}
 
+	// ReportWarnings
+	if val := query.Get("ReportWarnings"); val != "" {
+		if v, err := strconv.ParseBool(val); err != nil {
+			return err
+		} else {
+			p.reportWarnings = v
+		}
+	}
 	return nil
 }
 

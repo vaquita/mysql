@@ -9,6 +9,7 @@ type Error struct {
 	code     uint16
 	sqlState string
 	message  string
+	warnings uint16
 	when     time.Time
 }
 
@@ -36,4 +37,8 @@ func (e *Error) Message() string {
 // When returns time when error occurred.
 func (e *Error) When() time.Time {
 	return e.when
+}
+
+func (e *Error) Warnings() uint16 {
+	return e.warnings
 }

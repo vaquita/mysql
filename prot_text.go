@@ -110,7 +110,7 @@ const (
 )
 
 // parseOkPacket parses the OK packet received from the server.
-func (c *Conn) parseOkPacket(b []byte) {
+func (c *Conn) parseOkPacket(b []byte) bool {
 	var off, n int
 
 	off++ // [00] the OK header (= _PACKET_OK)
@@ -124,6 +124,8 @@ func (c *Conn) parseOkPacket(b []byte) {
 	c.warnings = binary.LittleEndian.Uint16(b[off : off+2])
 	off += 2
 	// TODO : read rest of the fields
+
+	return c.reportWarnings()
 }
 
 // parseErrPacket parses the ERR packet received from the server.
@@ -141,7 +143,7 @@ func (c *Conn) parseErrPacket(b []byte) {
 }
 
 // parseEOFPacket parses the EOF packet received from the server.
-func (c *Conn) parseEOFPacket(b []byte) {
+func (c *Conn) parseEOFPacket(b []byte) bool {
 	var off int
 
 	off++ // [fe] the EOF header (= _PACKET_EOF)
@@ -149,6 +151,20 @@ func (c *Conn) parseEOFPacket(b []byte) {
 	c.warnings += binary.LittleEndian.Uint16(b[off : off+2])
 	off += 2
 	c.statusFlags = binary.LittleEndian.Uint16(b[off : off+2])
+
+	return c.reportWarnings()
+}
+
+func (c *Conn) reportWarnings() bool {
+	if c.p.reportWarnings && c.warnings > 0 {
+		c.e.code = 0
+		c.e.sqlState = "01000"
+		c.e.message = "last command resulted in warning(s)"
+		c.e.warnings = c.warnings
+		c.e.when = time.Now()
+		return true // warnings reported
+	}
+	return false
 }
 
 //<!-- command phase packets -->
@@ -412,8 +428,9 @@ func (c *Conn) handleQuery(query string, args []driver.Value) (driver.Rows, erro
 
 func (c *Conn) handleExecResponse() (*Result, error) {
 	var (
-		err error
-		b   []byte
+		err  error
+		b    []byte
+		warn bool
 	)
 
 	if b, err = c.readPacket(); err != nil {
@@ -429,7 +446,7 @@ func (c *Conn) handleExecResponse() (*Result, error) {
 
 	case _PACKET_OK: // expected
 		// parse Ok packet and break
-		c.parseOkPacket(b)
+		warn = c.parseOkPacket(b)
 
 	case _PACKET_INFILE_REQ: // expected
 		// local infile request; handle it
@@ -447,13 +464,20 @@ func (c *Conn) handleExecResponse() (*Result, error) {
 	res := new(Result)
 	res.lastInsertId = int64(c.lastInsertId)
 	res.rowsAffected = int64(c.affectedRows)
+
+	if warn {
+		// command resulted in warning(s), return results and error
+		return res, &c.e
+	}
+
 	return res, nil
 }
 
 func (c *Conn) handleQueryResponse() (*Rows, error) {
 	var (
-		err error
-		b   []byte
+		err  error
+		b    []byte
+		warn bool
 	)
 
 	if b, err = c.readPacket(); err != nil {
@@ -469,7 +493,12 @@ func (c *Conn) handleQueryResponse() (*Rows, error) {
 	case _PACKET_OK: // unexpected!
 		// the command resulted in a Result (anti-pattern ?); but
 		// since it succeeded we handle it and return nil.
-		c.parseOkPacket(b)
+		warn = c.parseOkPacket(b)
+
+		if warn {
+			return nil, &c.e
+		}
+
 		return nil, nil
 
 	case _PACKET_INFILE_REQ: // unexpected!
@@ -491,9 +520,9 @@ func (c *Conn) handleQueryResponse() (*Rows, error) {
 
 func (c *Conn) handleResultSet(columnCount uint16) (*Rows, error) {
 	var (
-		err  error
-		b    []byte
-		done bool
+		err        error
+		b          []byte
+		done, warn bool
 	)
 
 	rs := new(Rows)
@@ -515,7 +544,7 @@ func (c *Conn) handleResultSet(columnCount uint16) (*Rows, error) {
 	if b, err = c.readPacket(); err != nil {
 		return nil, err
 	} else {
-		c.parseEOFPacket(b)
+		warn = c.parseEOFPacket(b)
 	}
 
 	// read resultset row packets (each containing rs.columnCount values),
@@ -535,6 +564,10 @@ func (c *Conn) handleResultSet(columnCount uint16) (*Rows, error) {
 			rs.rows = append(rs.rows,
 				c.handleResultSetRow(b, rs))
 		}
+	}
+	if warn {
+		// command resulted in warning(s), return results and error
+		return rs, &c.e
 	}
 	return rs, nil
 }
@@ -634,16 +667,19 @@ func replacePlaceholders(query string, args []driver.Value) string {
 
 func (c *Conn) handleInfileRequest(filename string) error {
 	var (
-		b             []byte
-		err, savedErr error
+		b              []byte
+		err, savedErr  error
+		errSaved, warn bool
 	)
 
 	// do not skip on error to avoid "packets out of order"
 	if b, err = createInfileDataPacket(filename); err != nil {
 		savedErr = err
+		errSaved = true
 		goto L
 	} else if err = c.writePacket(b); err != nil {
 		savedErr = err
+		errSaved = true
 		goto L
 	}
 
@@ -666,12 +702,21 @@ L:
 
 	case _PACKET_OK:
 		// parse Ok packet
-		c.parseOkPacket(b)
+		warn = c.parseOkPacket(b)
 
 	default:
 		// TODO: handle error
 	}
-	return savedErr
+	if errSaved {
+		return savedErr
+	}
+
+	if warn {
+		return &c.e
+	}
+
+	return nil
+
 }
 
 // createInfileDataPacket generates a packet containing contents of the

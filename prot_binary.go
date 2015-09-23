@@ -190,7 +190,10 @@ func (c *Conn) handleStmtPrepare(query string) (s *Stmt, err error) {
 }
 
 func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
-	var b []byte
+	var (
+		b    []byte
+		warn bool
+	)
 
 	s = new(Stmt)
 	s.c = c
@@ -205,7 +208,7 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 
 	switch b[0] {
 	case _PACKET_OK: // COM_STMT_PREPARE_OK packet
-		s.parseStmtPrepareOkPacket(b)
+		warn = s.parseStmtPrepareOkPacket(b)
 	case _PACKET_ERR:
 		c.parseErrPacket(b)
 		err = &c.e
@@ -221,7 +224,7 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 		}
 		switch b[0] {
 		case _PACKET_EOF: // EOF packet, done!
-			c.parseEOFPacket(b)
+			warn = c.parseEOFPacket(b)
 			more = false
 		default: // column definition packet
 			s.paramDefs = append(s.paramDefs, parseColumnDefinitionPacket(b, false))
@@ -236,17 +239,22 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 		}
 		switch b[0] {
 		case _PACKET_EOF: // EOF packet, done!
-			c.parseEOFPacket(b)
+			warn = c.parseEOFPacket(b)
 			more = false
 		default: // column definition packet
 			s.columnDefs = append(s.columnDefs, parseColumnDefinitionPacket(b, false))
 		}
 	}
+
+	if warn {
+		err = &c.e
+	}
+
 	return
 }
 
 // parseStmtPrepareOk parses COM_STMT_PREPARE_OK packet.
-func (s *Stmt) parseStmtPrepareOkPacket(b []byte) {
+func (s *Stmt) parseStmtPrepareOkPacket(b []byte) bool {
 	var off int
 
 	off++ // [00] OK
@@ -257,8 +265,11 @@ func (s *Stmt) parseStmtPrepareOkPacket(b []byte) {
 	s.paramCount = binary.LittleEndian.Uint16(b[off : off+2])
 	off += 2
 	off++ // reserved [00] filler
-	s.warningCount = binary.LittleEndian.Uint16(b[off : off+2])
+	s.warnings = binary.LittleEndian.Uint16(b[off : off+2])
 	off += 2
+
+	s.c.warnings = s.warnings
+	return s.c.reportWarnings()
 }
 
 // handleExec handles COM_STMT_EXECUTE and related packets for Stmt's Exec()
@@ -334,8 +345,9 @@ func comStmtExecutePayloadLength(s *Stmt, args []driver.Value) (length uint64) {
 
 func (s *Stmt) handleExecResponse() (*Result, error) {
 	var (
-		err error
-		b   []byte
+		err  error
+		b    []byte
+		warn bool
 	)
 
 	c := s.c
@@ -353,7 +365,7 @@ func (s *Stmt) handleExecResponse() (*Result, error) {
 
 	case _PACKET_OK: // expected
 		// parse Ok packet and break
-		c.parseOkPacket(b)
+		warn = c.parseOkPacket(b)
 		break
 
 	case _PACKET_INFILE_REQ: // expected
@@ -372,6 +384,12 @@ func (s *Stmt) handleExecResponse() (*Result, error) {
 	res := new(Result)
 	res.lastInsertId = int64(c.lastInsertId)
 	res.rowsAffected = int64(c.affectedRows)
+
+	if warn {
+		// command resulted in warning(s), return results and error
+		return res, &c.e
+	}
+
 	return res, nil
 }
 
@@ -396,7 +414,11 @@ func (s *Stmt) handleQueryResponse() (*Rows, error) {
 	case _PACKET_OK: // unexpected!
 		// the command resulted in a Result (anti-pattern ?); but
 		// since it succeeded we handle it and return nil.
-		c.parseOkPacket(b)
+		if c.parseOkPacket(b) {
+			// the command resulted in warning(s)
+			return nil, &c.e
+		}
+
 		return nil, nil
 
 	case _PACKET_INFILE_REQ: // unexpected!
@@ -418,9 +440,9 @@ func (s *Stmt) handleQueryResponse() (*Rows, error) {
 
 func (c *Conn) handleBinaryResultSet(columnCount uint16) (*Rows, error) {
 	var (
-		err  error
-		b    []byte
-		done bool
+		err        error
+		b          []byte
+		done, warn bool
 	)
 
 	rs := new(Rows)
@@ -442,7 +464,7 @@ func (c *Conn) handleBinaryResultSet(columnCount uint16) (*Rows, error) {
 	if b, err = c.readPacket(); err != nil {
 		return nil, err
 	} else {
-		c.parseEOFPacket(b)
+		warn = c.parseEOFPacket(b)
 	}
 
 	// read resultset row packets (each containing rs.columnCount values),
@@ -463,6 +485,12 @@ func (c *Conn) handleBinaryResultSet(columnCount uint16) (*Rows, error) {
 				c.handleBinaryResultSetRow(b, rs))
 		}
 	}
+
+	if warn {
+		// command resulted in warning(s), return results and error
+		return rs, &c.e
+	}
+
 	return rs, nil
 }
 

@@ -110,8 +110,9 @@ func (nr *netReader) close() error {
 
 func (nr *netReader) registerSlave() error {
 	var (
-		err error
-		b   []byte
+		err  error
+		b    []byte
+		warn bool
 	)
 
 	// reset the protocol packet sequence number
@@ -129,7 +130,7 @@ func (nr *netReader) registerSlave() error {
 	switch b[0] {
 	case _PACKET_OK: //expected
 		// parse OK packet
-		nr.conn.parseOkPacket(b)
+		warn = nr.conn.parseOkPacket(b)
 
 	case _PACKET_ERR: //expected
 		// parse err packet
@@ -138,6 +139,10 @@ func (nr *netReader) registerSlave() error {
 
 	default: // unexpected
 		// TODO: handle error
+	}
+
+	if warn {
+		return &nr.conn.e
 	}
 
 	return nil
@@ -255,8 +260,9 @@ func parseEventHeader(b []byte) (eventHeader, int) {
 
 func (nr *netReader) readEvent() error {
 	var (
-		err error
-		b   []byte
+		err  error
+		b    []byte
+		warn bool
 	)
 
 	if b, err = nr.conn.readPacket(); err != nil {
@@ -274,12 +280,17 @@ func (nr *netReader) readEvent() error {
 		return &nr.conn.e
 
 	case _PACKET_EOF: // expected
-		nr.conn.parseEOFPacket(b)
+		warn = nr.conn.parseEOFPacket(b)
 		nr.eof = true
 
 	default: //unexpected
 		return errors.New("mysql: invalid event packet")
 	}
+
+	if warn {
+		return &nr.conn.e
+	}
+
 	return nil
 }
 

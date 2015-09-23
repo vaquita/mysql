@@ -12,9 +12,9 @@ type Stmt struct {
 	query string
 
 	// COM_STMT_PREPARE response
-	columnCount  uint16
-	paramCount   uint16
-	warningCount uint16
+	columnCount uint16
+	paramCount  uint16
+	warnings    uint16
 	// TODO: where to use the following received column definitions?
 	paramDefs  []*columnDefinition
 	columnDefs []*columnDefinition
