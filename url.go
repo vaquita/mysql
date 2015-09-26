@@ -42,14 +42,19 @@ type properties struct {
 }
 
 func (p *properties) parseUrl(dsn string) error {
+	var (
+		u   *url.URL
+		err error
+	)
+
 	// initialize default properties
 	p.clientCapabilities = _DEFAULT_CAPABILITIES
 
-	u, err := url.Parse(dsn)
-	if err != nil {
-		return err
+	if u, err = url.Parse(dsn); err != nil {
+		return myError(ErrInvalidDSN, err)
 	}
 
+	// we check for its correctness later
 	p.scheme = u.Scheme
 
 	if p.scheme == "file" {
@@ -76,7 +81,7 @@ func (p *properties) parseUrl(dsn string) error {
 	// LocalInfile
 	if val := query.Get("LocalInfile"); val != "" {
 		if v, err := strconv.ParseBool(val); err != nil {
-			return err
+			return myError(ErrInvalidProperty, "LocalInfile", err)
 		} else if v {
 			p.clientCapabilities |= _CLIENT_LOCAL_FILES
 		}
@@ -85,7 +90,7 @@ func (p *properties) parseUrl(dsn string) error {
 	// MaxAllowedPacket
 	if val := query.Get("MaxAllowedPacket"); val != "" {
 		if v, err := strconv.ParseUint(val, 10, 32); err != nil {
-			return err
+			return myError(ErrInvalidProperty, "MaxAllowedPacket", err)
 		} else {
 			p.maxPacketSize = uint32(v)
 		}
@@ -114,7 +119,7 @@ func (p *properties) parseUrl(dsn string) error {
 	// Compress
 	if val := query.Get("Compress"); val != "" {
 		if v, err := strconv.ParseBool(val); err != nil {
-			return err
+			return myError(ErrInvalidProperty, "Compress", err)
 		} else if v {
 			p.clientCapabilities |= _CLIENT_COMPRESS
 		}
@@ -123,7 +128,7 @@ func (p *properties) parseUrl(dsn string) error {
 	// SlaveId
 	if val := query.Get("SlaveId"); val != "" {
 		if v, err := strconv.ParseUint(val, 10, 32); err != nil {
-			return err
+			return myError(ErrInvalidProperty, "SlaveId", err)
 		} else {
 			p.slaveId = uint32(v)
 		}
@@ -134,7 +139,7 @@ func (p *properties) parseUrl(dsn string) error {
 	// ReportWarnings
 	if val := query.Get("ReportWarnings"); val != "" {
 		if v, err := strconv.ParseBool(val); err != nil {
-			return err
+			return myError(ErrInvalidProperty, "ReportWarnings", err)
 		} else {
 			p.reportWarnings = v
 		}

@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"database/sql/driver"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -31,21 +30,21 @@ type NullTime struct {
 }
 
 // Scan implements the scanner interface.
-func (nt *NullTime) Scan(value interface{}) (err error) {
+func (nt *NullTime) Scan(value interface{}) error {
 	if value == nil {
 		nt.Time, nt.Valid = InvalidTime, false
-		return
+		return nil
 	}
 
 	switch v := value.(type) {
 	case time.Time:
 		nt.Time, nt.Valid = v, true
-		return
+		return nil
 
 	// TODO: handle other types/cases
 	default:
 	}
-	return
+	return nil
 }
 
 // Value implements the driver's Valuer interface.
@@ -62,17 +61,19 @@ type NullDuration struct {
 }
 
 // Scan implements the scanner interface.
-func (nd *NullDuration) Scan(value interface{}) (err error) {
+func (nd *NullDuration) Scan(value interface{}) error {
+	var err error
+
 	if value == nil {
 		nd.Duration, nd.Valid = InvalidDuration, false
-		return
+		return nil
 	}
 
 	switch v := value.(type) {
 	case string:
 		if nd.Duration, err = parseDuration(v); err != nil {
 			nd.Duration, nd.Valid = 0, false
-			return
+			return nil
 		}
 		nd.Valid = true
 
@@ -82,7 +83,8 @@ func (nd *NullDuration) Scan(value interface{}) (err error) {
 	// TODO: handle other types/cases
 	default:
 	}
-	return
+
+	return nil
 }
 
 // Value implements the driver's Valuer interface.
@@ -102,26 +104,25 @@ func parseDuration(s string) (time.Duration, error) {
 	switch len(v) {
 	case 3:
 		if secs, err := strconv.ParseFloat(v[2], 64); err != nil {
-			return 0, err
+			return 0, myError(ErrInvalidType, err)
 		} else {
 			d += time.Duration(secs*1000000) * time.Microsecond
 		}
 		fallthrough
 	case 2:
 		if mins, err := strconv.ParseInt(v[1], 10, 64); err != nil {
-			return 0, err
+			return 0, myError(ErrInvalidType, err)
 		} else {
 			d += time.Duration(mins) * time.Minute
 		}
 		fallthrough
 	case 1:
 		if hours, err := strconv.ParseInt(v[0], 10, 64); err != nil {
-			return 0, err
+			return 0, myError(ErrInvalidType, err)
 		} else {
 			d += time.Duration(hours) * time.Hour
 		}
 	default:
-		return 0, errors.New("mysql: invalid time format")
 	}
 
 	return d, nil

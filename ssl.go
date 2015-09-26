@@ -19,14 +19,14 @@ func (c *Conn) sslConnect() error {
 	if c.p.sslCA != "" {
 		certPool = x509.NewCertPool()
 		if pemCerts, err = ioutil.ReadFile(c.p.sslCA); err != nil {
-			return err
+			return myError(ErrSSLConnection, err)
 		} else {
 			certPool.AppendCertsFromPEM(pemCerts)
 		}
 	}
 
 	if cert, err = tls.LoadX509KeyPair(c.p.sslCert, c.p.sslKey); err != nil {
-		return err
+		return myError(ErrSSLConnection, err)
 	}
 
 	config := tls.Config{Certificates: []tls.Certificate{cert},
@@ -36,7 +36,7 @@ func (c *Conn) sslConnect() error {
 	conn = tls.Client(c.conn, &config)
 
 	if err = conn.Handshake(); err != nil {
-		return err
+		return myError(ErrSSLConnection, err)
 	}
 
 	// update the connection handle

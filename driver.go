@@ -3,7 +3,6 @@ package mysql
 import (
 	"database/sql"
 	"database/sql/driver"
-	"errors"
 )
 
 type Driver struct {
@@ -26,7 +25,7 @@ func (d Driver) Open(dsn string) (driver.Conn, error) {
 	}
 
 	if p.scheme != "mysql" {
-		return nil, errors.New("mysql: invalid url scheme")
+		return nil, myError(ErrScheme, p.scheme)
 	}
 
 	return open(p)

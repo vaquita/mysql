@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"time"
 )
@@ -120,8 +119,7 @@ func (b *Binlog) Connect(dsn string) error {
 		}
 
 	default:
-		err = errors.New("mysql: invalid url scheme")
-		return err
+		return myError(ErrScheme, p.scheme)
 
 	}
 	return nil

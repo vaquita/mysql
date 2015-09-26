@@ -176,23 +176,27 @@ func createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) []byte {
 }
 
 // handleStmtPrepare handles COM_STMT_PREPARE and related packets
-func (c *Conn) handleStmtPrepare(query string) (s *Stmt, err error) {
+func (c *Conn) handleStmtPrepare(query string) (*Stmt, error) {
+	var err error
+
 	// reset the protocol packet sequence number
 	c.resetSeqno()
 
 	// write COM_STMT_PREPARE packet
 	if err = c.writePacket(createComStmtPrepare(query)); err != nil {
-		return
+		return nil, err
 	}
 
 	// handle the response
 	return c.handleComStmtPrepareResponse()
 }
 
-func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
+func (c *Conn) handleComStmtPrepareResponse() (*Stmt, error) {
 	var (
+		s    *Stmt
 		b    []byte
 		warn bool
+		err  error
 	)
 
 	s = new(Stmt)
@@ -203,7 +207,7 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 
 	// read COM_STMT_PREPARE_OK packet.
 	if b, err = c.readPacket(); err != nil {
-		return
+		return nil, err
 	}
 
 	switch b[0] {
@@ -211,8 +215,9 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 		warn = s.parseStmtPrepareOkPacket(b)
 	case _PACKET_ERR:
 		c.parseErrPacket(b)
-		err = &c.e
-		return
+		return nil, &c.e
+	default:
+		return nil, myError(ErrInvalidPacket)
 	}
 
 	more := s.paramCount > 0 // more packets ?
@@ -220,7 +225,7 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 	// parameter definition block: read param definition packet(s)
 	for more {
 		if b, err = c.readPacket(); err != nil {
-			return
+			return nil, err
 		}
 		switch b[0] {
 		case _PACKET_EOF: // EOF packet, done!
@@ -235,7 +240,7 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 
 	for more {
 		if b, err = c.readPacket(); err != nil {
-			return
+			return nil, err
 		}
 		switch b[0] {
 		case _PACKET_EOF: // EOF packet, done!
@@ -247,10 +252,10 @@ func (c *Conn) handleComStmtPrepareResponse() (s *Stmt, err error) {
 	}
 
 	if warn {
-		err = &c.e
+		return s, &c.e
 	}
 
-	return
+	return s, nil
 }
 
 // parseStmtPrepareOk parses COM_STMT_PREPARE_OK packet.

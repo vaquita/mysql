@@ -3,7 +3,6 @@ package mysql
 import (
 	"crypto/sha1"
 	"encoding/binary"
-	"errors"
 )
 
 //<!-- connection phase packets -->
@@ -193,15 +192,17 @@ func (c *Conn) handshakeResponse2Length(authLength int) (length int) {
 }
 
 // handshake performs handshake during connection establishment
-func (c *Conn) handshake() (err error) {
+func (c *Conn) handshake() error {
 	var (
-		b                      []byte
-		useSSL, useCompression bool
+		b              []byte
+		useSSL         bool
+		useCompression bool
+		err            error
 	)
 
 	// read handshake initialization packet.
 	if b, err = c.readPacket(); err != nil {
-		return
+		return err
 	}
 
 	c.parseGreetingPacket(b)
@@ -212,7 +213,7 @@ func (c *Conn) handshake() (err error) {
 		if c.serverCapabilities&_CLIENT_SSL == 0 {
 			// error: client requested for SSL but server doesn't
 			// support SSL.
-			return errors.New("mysql: server does not support SSL connection")
+			return myError(ErrSSLSupport)
 		} else {
 			useSSL = true
 		}
@@ -222,7 +223,7 @@ func (c *Conn) handshake() (err error) {
 		if c.serverCapabilities&_CLIENT_COMPRESS == 0 {
 			// error: client requested for packet compression but server doesn't
 			// support compression protocol.
-			return errors.New("mysql: server does not support packet compression")
+			return myError(ErrCompressionSupport)
 		} else {
 			useCompression = true
 		}
@@ -231,31 +232,31 @@ func (c *Conn) handshake() (err error) {
 	if !useSSL {
 		// send plain handshake response packet
 		if err = c.writePacket(c.createHandshakeResponsePacket()); err != nil {
-			return
+			return err
 		}
 	} else {
 		// send SSL request packet (1st part of handshake response
 		// packet)
 		if err = c.writePacket(c.createSSLRequestPacket()); err != nil {
-			return
+			return err
 		}
 
 		// switch to tls
 		if err = c.sslConnect(); err != nil {
-			return
+			return err
 		}
 
 		// <!-- SSL activated -->
 
 		// now send the entire handshake response packet
 		if err = c.writePacket(c.createHandshakeResponsePacket()); err != nil {
-			return
+			return err
 		}
 	}
 
 	// read server response
 	if b, err = c.readPacket(); err != nil {
-		return
+		return err
 	}
 
 	switch b[0] {

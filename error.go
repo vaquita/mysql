@@ -13,10 +13,60 @@ type Error struct {
 	when     time.Time
 }
 
-// Error returns the formatted error message. (also required by Go' error
+// client error codes
+const (
+	ErrWarning = 0
+	ErrUnknown = 9000 + iota
+	ErrConnection
+	ErrRead
+	ErrWrite
+	ErrSSLSupport
+	ErrSSLConnection
+	ErrCompressionSupport
+	ErrCompression
+	ErrInvalidType
+	ErrInvalidDSN
+	ErrInvalidProperty
+	ErrScheme
+	ErrCursor
+	ErrFile
+	ErrInvalidPacket
+)
+
+var errFormat = map[uint16]string{
+	ErrWarning:            "Execution of last statement resulted in warning(s)",
+	ErrUnknown:            "Unknown error",
+	ErrConnection:         "Can't connect to the server (%s)",
+	ErrRead:               "Can't read data from connection (%s)",
+	ErrWrite:              "Can't write data to connection (%s)",
+	ErrSSLSupport:         "Server does not support SSL connection",
+	ErrSSLConnection:      "Can't establish SSL connection with the server (%s)",
+	ErrCompressionSupport: "Server does not support packet compression",
+	ErrCompression:        "Compression error (%s)",
+	ErrInvalidType:        "Invalid type (%s)",
+	ErrInvalidDSN:         "Can't parse data source name (%s)",
+	ErrInvalidProperty:    "Invalid value for property '%s' (%s)",
+	ErrScheme:             "Unsupported scheme '%s'",
+	ErrCursor:             "Cursor is closed",
+	ErrFile:               "File operation failed (%s)",
+	ErrInvalidPacket:      "Invalid/unexpected packet received",
+}
+
+func myError(code uint16, a ...interface{}) *Error {
+	return &Error{code: code,
+		message: fmt.Sprintf(errFormat[code], a...),
+		when:    time.Now()}
+}
+
+// Error returns the formatted error message. (also required by Go's error
 // interface)
 func (e *Error) Error() string {
-	return fmt.Sprintf("mysqld: %d (%s): %s", e.code, e.sqlState, e.message)
+	if e.code == ErrWarning || e.code >= ErrUnknown {
+		// client error
+		return fmt.Sprintf("[mysql] %d : %s", e.code, e.message)
+	}
+	// server error
+	return fmt.Sprintf("[mysqld] %d (%s): %s", e.code, e.sqlState, e.message)
 }
 
 // Code returns the error number.

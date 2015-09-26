@@ -37,12 +37,13 @@ func (rw *compressRW) read(c net.Conn, b []byte) (n int, err error) {
 }
 
 // readCompressedPacket reads a single compressed protocol packet.
-func (rw *compressRW) readCompressedPacket(c net.Conn) (err error) {
+func (rw *compressRW) readCompressedPacket(c net.Conn) error {
+	var err error
 
 	// read compressed packet header and parse it
 	header := make([]byte, 7)
 	if _, err = c.Read(header); err != nil {
-		return err
+		return myError(ErrRead, err)
 	}
 
 	payloadLength := getUint24(header[0:3])    // packet payload length
@@ -54,16 +55,24 @@ func (rw *compressRW) readCompressedPacket(c net.Conn) (err error) {
 	// read compressed protocol packet payload from the network
 	payload := make([]byte, payloadLength)
 	if _, err = c.Read(payload); err != nil {
-		return err
+		return myError(ErrRead, err)
 	}
 
 	if origPayloadLength != 0 { // its a compressed payload
-		r, _ := zlib.NewReader(bytes.NewBuffer(payload))
-		io.Copy(&rw.readBuffer, r)
+		var r io.ReadCloser
+
+		if r, err = zlib.NewReader(bytes.NewBuffer(payload)); err != nil {
+			return myError(ErrCompression, err)
+		} else {
+			io.Copy(&rw.readBuffer, r)
+		}
 
 	} else { // its an uncompressed payload
-		rw.readBuffer.Write(payload)
+		if _, err = rw.readBuffer.Write(payload); err != nil {
+			return myError(ErrCompression, err)
+		}
 	}
+
 	rw.filled = true
 	return nil
 }
@@ -90,24 +99,29 @@ func (rw *compressRW) write(c net.Conn, b []byte) (n int, err error) {
 
 // createCompressedPacket generates a compressed protocol packet after
 // compressing the specified payload.
-func (rw *compressRW) createCompressedPacket(payload []byte) (packet []byte, err error) {
-	var w *zlib.Writer
-	var z bytes.Buffer
+func (rw *compressRW) createCompressedPacket(payload []byte) ([]byte, error) {
+	var (
+		w             *zlib.Writer
+		z             bytes.Buffer
+		packet        []byte
+		err           error
+		payloadLength int
+	)
 
 	// TODO: add a property for compression level
 	if w, err = zlib.NewWriterLevel(&z, zlib.DefaultCompression); err != nil {
-		return
+		goto E
 	}
 
 	if _, err = w.Write(payload); err != nil {
-		return
+		goto E
 	}
 
 	if err = w.Close(); err != nil {
-		return
+		goto E
 	}
 
-	payloadLength := z.Len()
+	payloadLength = z.Len()
 
 	// allocate buffer for the compressed packet
 	// header (7 bytes) + payload
@@ -123,7 +137,12 @@ func (rw *compressRW) createCompressedPacket(payload []byte) (packet []byte, err
 
 	// copy the compressed payload
 	copy(packet[7:], z.Bytes())
-	return
+
+	return packet, nil
+
+E:
+	return nil, myError(ErrCompression, err)
+
 }
 
 // createPacket generates a non-compressed protocol packet from the specified

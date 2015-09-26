@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"database/sql/driver"
-	"errors"
 	"io"
 )
 
@@ -53,7 +52,7 @@ func (r *Rows) Close() error {
 
 func (r *Rows) Next(dest []driver.Value) error {
 	if r.closed == true {
-		return errors.New("mysql: cursor is closed")
+		return myError(ErrCursor)
 	}
 
 	if r.pos >= uint64(len(r.rows)) {

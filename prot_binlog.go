@@ -2,7 +2,6 @@ package mysql
 
 import (
 	"encoding/binary"
-	"errors"
 	"io"
 	"os"
 	"strconv"
@@ -41,7 +40,7 @@ func (nr *netReader) init(p properties) error {
 	nr.slave.host = v[0]
 
 	if port, err = strconv.ParseUint(v[1], 10, 16); err != nil {
-		return err
+		return myError(ErrInvalidDSN, err)
 	} else {
 		nr.slave.port = uint16(port)
 	}
@@ -138,7 +137,7 @@ func (nr *netReader) registerSlave() error {
 		return &nr.conn.e
 
 	default: // unexpected
-		// TODO: handle error
+		return myError(ErrInvalidPacket)
 	}
 
 	if warn {
@@ -284,7 +283,7 @@ func (nr *netReader) readEvent() error {
 		nr.eof = true
 
 	default: //unexpected
-		return errors.New("mysql: invalid event packet")
+		return myError(ErrInvalidPacket)
 	}
 
 	if warn {
@@ -977,12 +976,12 @@ func (fr *fileReader) begin(index binlogIndex) error {
 		// close the previously opened file
 		if !fr.closed {
 			if err = fr.close(); err != nil {
-				return err
+				return myError(ErrFile, err)
 			}
 		}
 		// open the new file
 		if fr.file, err = os.Open(fr.name); err != nil {
-			return nil
+			return myError(ErrFile, err)
 		}
 		fr.closed = false
 	}
@@ -990,14 +989,14 @@ func (fr *fileReader) begin(index binlogIndex) error {
 	if index.position > 0 {
 		if _, err = fr.file.Seek(int64(index.position), 0); err != nil {
 			// seek operation failed
-			return err
+			return myError(ErrFile, err)
 		}
 	}
 
 	// read and verify magic number
 	magic := make([]byte, 4)
 	if _, err = fr.file.Read(magic); err != nil {
-		return err
+		return myError(ErrFile, err)
 
 	} else {
 		// TODO: verify magic number [0xfe, 'b', 'i', 'n']
@@ -1016,7 +1015,7 @@ func (fr *fileReader) close() error {
 	if !fr.closed {
 		if err = fr.file.Close(); err != nil {
 			// file close operation failed
-			return nil
+			return myError(ErrFile, err)
 		}
 	}
 	fr.closed = true
@@ -1047,9 +1046,10 @@ func (fr *fileReader) event() []byte {
 func (fr *fileReader) init(p properties) error {
 	var err error
 	fr.name = p.file
+
 	if fr.file, err = os.Open(fr.name); err != nil {
 		fr.closed = true
-		return err
+		return myError(ErrFile, err)
 	}
 	fr.closed = false
 	return nil
@@ -1064,13 +1064,12 @@ func (fr *fileReader) readEvent() error {
 
 	// read the binlog header
 	headerBuf = make([]byte, 19)
-	_, err = fr.file.Read(headerBuf)
-	if err != nil {
+	if _, err = fr.file.Read(headerBuf); err != nil {
 		if err == io.EOF {
 			fr.eof = true
 			return nil
 		} else {
-			return err
+			return myError(ErrFile, err)
 		}
 	}
 
@@ -1084,7 +1083,7 @@ func (fr *fileReader) readEvent() error {
 			fr.eof = true
 			return nil
 		} else {
-			return err
+			return myError(ErrFile, err)
 		}
 	}
 

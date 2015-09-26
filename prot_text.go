@@ -705,8 +705,9 @@ L:
 		warn = c.parseOkPacket(b)
 
 	default:
-		// TODO: handle error
+		return myError(ErrInvalidPacket)
 	}
+
 	if errSaved {
 		return savedErr
 	}
@@ -729,18 +730,18 @@ func createInfileDataPacket(filename string) ([]byte, error) {
 	)
 
 	if f, err = os.Open(filename); err != nil {
-		return nil, err
+		return nil, myError(ErrFile, err)
 	}
 	defer f.Close()
 
 	if fi, err = f.Stat(); err != nil {
-		return nil, err
+		return nil, myError(ErrFile, err)
 	}
 
 	b := make([]byte, 4+fi.Size())
 
 	if _, err = f.Read(b[4:]); err != nil {
-		return nil, err
+		return nil, myError(ErrFile, err)
 	}
 
 	return b, nil

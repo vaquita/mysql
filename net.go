@@ -5,15 +5,25 @@ import (
 )
 
 // dial opens a connection with the server; prefer socket if specified.
-func dial(address, socket string) (c net.Conn, err error) {
-	var addr, network string
+func dial(address, socket string) (net.Conn, error) {
+	var (
+		c       net.Conn
+		addr    string
+		network string
+		err     error
+	)
 
 	if socket != "" {
 		network, addr = "socket", socket
 	} else {
 		network, addr = "tcp", address
 	}
-	return net.Dial(network, addr)
+
+	if c, err = net.Dial(network, addr); err != nil {
+		return nil, myError(ErrConnection, err)
+	}
+	return c, nil
+
 }
 
 // readWriter is a generic interface to read/write protocol packets to/from
@@ -38,14 +48,32 @@ type defaultReadWriter struct {
 
 // read reads a protocol packet from the network and stores it into the
 // specified buffer.
-func (rw *defaultReadWriter) read(c net.Conn, b []byte) (n int, err error) {
-	return c.Read(b)
+func (rw *defaultReadWriter) read(c net.Conn, b []byte) (int, error) {
+	var (
+		n   int
+		err error
+	)
+
+	if n, err = c.Read(b); err != nil {
+		return n, myError(ErrRead, err)
+	}
+
+	return n, nil
 }
 
 // write writes the protocol packet (content of the specified buffer) to the
 // network.
-func (rw *defaultReadWriter) write(c net.Conn, b []byte) (n int, err error) {
-	return c.Write(b)
+func (rw *defaultReadWriter) write(c net.Conn, b []byte) (int, error) {
+	var (
+		n   int
+		err error
+	)
+
+	if n, err = c.Write(b); err != nil {
+		return n, myError(ErrWrite, err)
+	}
+
+	return n, nil
 }
 
 // reset is no-op.
