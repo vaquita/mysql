@@ -19,8 +19,9 @@ const (
 )
 
 type netReader struct {
-	conn  *Conn
-	slave binlogSlave
+	conn        *Conn
+	slave       binlogSlave
+	nonBlocking bool
 
 	first  bool
 	eof    bool
@@ -47,11 +48,13 @@ func (nr *netReader) init(p properties) error {
 		nr.slave.port = uint16(port)
 	}
 
-	nr.slave.id = p.slaveId
+	nr.slave.id = p.binlogSlaveId
 	nr.slave.username = p.username
 	nr.slave.password = p.password
 	nr.slave.replicationRank = 0
 	nr.slave.masterId = 0
+
+	nr.nonBlocking = p.binlogDumpNonBlock
 
 	// establish a connection with the master server
 	if nr.conn, err = open(p); err != nil {
@@ -93,7 +96,7 @@ func (nr *netReader) binlogDump(index binlogIndex) error {
 	nr.conn.resetSeqno()
 
 	// send COM_BINLOG_DUMP packet to (master) server
-	if err = nr.conn.writePacket(createComBinlogDump(nr.slave, index)); err != nil {
+	if err = nr.conn.writePacket(createComBinlogDump(nr.slave, index, nr.nonBlocking)); err != nil {
 		return err
 	}
 
@@ -223,7 +226,7 @@ func createComRegisterSlave(s binlogSlave) (b []byte) {
 	return
 }
 
-func createComBinlogDump(slave binlogSlave, index binlogIndex) (b []byte) {
+func createComBinlogDump(slave binlogSlave, index binlogIndex, nonBlocking bool) (b []byte) {
 	var off int
 	payloadLength := 11 + len(index.file)
 
@@ -235,8 +238,13 @@ func createComBinlogDump(slave binlogSlave, index binlogIndex) (b []byte) {
 
 	binary.LittleEndian.PutUint32(b[off:off+4], index.position)
 	off += 4
-	// flags (0x01 : BINLOG_DUMP_NON_BLOCK)
-	binary.LittleEndian.PutUint16(b[off:off+2], uint16(0x01))
+	if nonBlocking {
+		// flags (0x01 : BINLOG_DUMP_NON_BLOCK)
+		binary.LittleEndian.PutUint16(b[off:off+2], uint16(0x01))
+	} else {
+		binary.LittleEndian.PutUint16(b[off:off+2], uint16(0))
+	}
+
 	off += 2
 	binary.LittleEndian.PutUint32(b[off:off+4], slave.id)
 	off += 4

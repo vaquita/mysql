@@ -37,8 +37,11 @@ type properties struct {
 	sslCert string
 	sslKey  string
 
-	slaveId        uint32 // used while registering as slave
-	reportWarnings bool   // report warnings count as error
+	reportWarnings bool // report warnings count as error
+
+	binlogSlaveId uint32 // used while registering as slave
+	// send EOF packet instead of blocking if no more events are left
+	binlogDumpNonBlock bool
 }
 
 func (p *properties) parseUrl(dsn string) error {
@@ -125,15 +128,15 @@ func (p *properties) parseUrl(dsn string) error {
 		}
 	}
 
-	// SlaveId
-	if val := query.Get("SlaveId"); val != "" {
+	// BinlogSlaveId
+	if val := query.Get("BinlogSlaveId"); val != "" {
 		if v, err := strconv.ParseUint(val, 10, 32); err != nil {
-			return myError(ErrInvalidProperty, "SlaveId", err)
+			return myError(ErrInvalidProperty, "BinlogSlaveId", err)
 		} else {
-			p.slaveId = uint32(v)
+			p.binlogSlaveId = uint32(v)
 		}
 	} else {
-		p.slaveId = _DEFAULT_SLAVE_ID
+		p.binlogSlaveId = _DEFAULT_SLAVE_ID
 	}
 
 	// ReportWarnings
@@ -144,6 +147,16 @@ func (p *properties) parseUrl(dsn string) error {
 			p.reportWarnings = v
 		}
 	}
+
+	// BinlogDumpNonBlock
+	if val := query.Get("BinlogDumpNonBlock"); val != "" {
+		if v, err := strconv.ParseBool(val); err != nil {
+			return myError(ErrInvalidProperty, "BinlogDumpNonBlock", err)
+		} else {
+			p.binlogDumpNonBlock = v
+		}
+	}
+
 	return nil
 }
 
