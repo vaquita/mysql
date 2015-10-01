@@ -22,9 +22,11 @@ type netReader struct {
 	conn  *Conn
 	slave binlogSlave
 
-	first bool
-	eof   bool
+	first  bool
+	eof    bool
+	closed bool
 
+	e         error
 	nextEvent []byte
 }
 
@@ -53,6 +55,7 @@ func (nr *netReader) init(p properties) error {
 
 	// establish a connection with the master server
 	if nr.conn, err = open(p); err != nil {
+		nr.closed = true
 		return err
 	}
 
@@ -104,14 +107,17 @@ func (nr *netReader) binlogDump(index binlogIndex) error {
 }
 
 func (nr *netReader) close() error {
-	return nr.conn.Close()
+	if err := nr.conn.Close(); err != nil {
+		return err
+	}
+	nr.closed = true
+	return nil
 }
 
 func (nr *netReader) registerSlave() error {
 	var (
-		err  error
-		b    []byte
-		warn bool
+		err error
+		b   []byte
 	)
 
 	// reset the protocol packet sequence number
@@ -129,7 +135,9 @@ func (nr *netReader) registerSlave() error {
 	switch b[0] {
 	case _PACKET_OK: //expected
 		// parse OK packet
-		warn = nr.conn.parseOkPacket(b)
+		if warn := nr.conn.parseOkPacket(b); warn {
+			return &nr.conn.e
+		}
 
 	case _PACKET_ERR: //expected
 		// parse err packet
@@ -140,17 +148,13 @@ func (nr *netReader) registerSlave() error {
 		return myError(ErrInvalidPacket)
 	}
 
-	if warn {
-		return &nr.conn.e
-	}
-
 	return nil
 }
 
 func (nr *netReader) next() bool {
 	var err error
 
-	if nr.eof {
+	if nr.closed || nr.eof {
 		return false
 	}
 
@@ -158,7 +162,10 @@ func (nr *netReader) next() bool {
 		nr.first = false
 	} else if err = nr.readEvent(); err != nil { // read the next event
 		nr.eof = true
-		// TODO: save error
+		if err != io.EOF {
+			nr.e = err
+		}
+		// no more events to read
 		return false
 	}
 	return true
@@ -166,6 +173,10 @@ func (nr *netReader) next() bool {
 
 func (nr *netReader) event() []byte {
 	return nr.nextEvent
+}
+
+func (nr *netReader) error() error {
+	return nr.e
 }
 
 func createComRegisterSlave(s binlogSlave) (b []byte) {
@@ -259,9 +270,8 @@ func parseEventHeader(b []byte) (eventHeader, int) {
 
 func (nr *netReader) readEvent() error {
 	var (
-		err  error
-		b    []byte
-		warn bool
+		err error
+		b   []byte
 	)
 
 	if b, err = nr.conn.readPacket(); err != nil {
@@ -276,18 +286,18 @@ func (nr *netReader) readEvent() error {
 	case _PACKET_ERR: //expected
 		// handle err packet
 		nr.conn.parseErrPacket(b)
+
 		return &nr.conn.e
 
 	case _PACKET_EOF: // expected
-		warn = nr.conn.parseEOFPacket(b)
-		nr.eof = true
+		if warn := nr.conn.parseEOFPacket(b); warn {
+			// save warning (if any)
+			nr.e = &nr.conn.e
+		}
+		return io.EOF
 
 	default: //unexpected
 		return myError(ErrInvalidPacket)
-	}
-
-	if warn {
-		return &nr.conn.e
 	}
 
 	return nil
@@ -964,6 +974,7 @@ type fileReader struct {
 	closed    bool
 	first     bool
 	eof       bool
+	e         error
 	nextEvent []byte
 }
 
@@ -1094,4 +1105,8 @@ func (fr *fileReader) readEvent() error {
 
 	fr.nextEvent = eventBuf
 	return nil
+}
+
+func (fr *fileReader) error() error {
+	return fr.e
 }

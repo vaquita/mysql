@@ -71,6 +71,7 @@ type binlogReader interface {
 	close() error
 	next() bool
 	event() []byte
+	error() error
 }
 
 // received from format descriptor event
@@ -179,6 +180,10 @@ func (b *Binlog) RawEvent() (re RawEvent) {
 
 func (b *Binlog) Close() error {
 	return b.reader.close()
+}
+
+func (b *Binlog) Error() error {
+	return b.reader.error()
 }
 
 type eventHeader struct {
