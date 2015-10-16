@@ -82,10 +82,10 @@ func myError(code uint16, a ...interface{}) *Error {
 func (e *Error) Error() string {
 	if e.code == ErrWarning || e.code >= ErrUnknown {
 		// client error
-		return fmt.Sprintf("[mysql] %d : %s", e.code, e.message)
+		return fmt.Sprintf("mysql: [%d] %s", e.code, e.message)
 	}
 	// server error
-	return fmt.Sprintf("[mysqld] %d (%s): %s", e.code, e.sqlState, e.message)
+	return fmt.Sprintf("mysqld: [%d] (%s) %s", e.code, e.sqlState, e.message)
 }
 
 // Code returns the error number.
