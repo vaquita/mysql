@@ -2,7 +2,7 @@ Go driver for MariaDB/MySQL server
 =======
 
 * A native Go driver for MariaDB/MySQL database server.
-* License : GNU LESSER GENERAL PUBLIC LICENSE Version 2.1.
+* License : The MIT License (MIT)
 * SSL support.
 * Compression support.
 * Support for Prepared Statements (PS).
