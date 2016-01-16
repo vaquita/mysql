@@ -34,7 +34,7 @@ type Driver struct {
 
 // init registers the driver
 func init() {
-	sql.Register("mysql", &Driver{})
+	sql.Register("vaquita", &Driver{})
 }
 
 func (d Driver) Open(dsn string) (driver.Conn, error) {
