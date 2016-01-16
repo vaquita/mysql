@@ -116,7 +116,10 @@ func (c *Conn) readPacket() ([]byte, error) {
 		return nil, myError(ErrNetPacketTooLarge)
 	}
 
-	// TODO: check out-of-order packet
+	// check for out-of-order packets
+	if c.seqno != b[3] {
+		return nil, myError(ErrNetPacketsOutOfOrder)
+	}
 
 	// increment the packet sequence number
 	c.seqno++

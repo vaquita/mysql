@@ -75,7 +75,6 @@ func (rw *compressRW) read(b []byte, length int) (int, error) {
 // into the local cache for uncompressed packets (ubuff)
 func (rw *compressRW) readCompressedPacket(unread int) error {
 	var (
-		//seqno                            uint8
 		payloadLength, origPayloadLength int
 		cbuff, old                       []byte
 		err                              error
@@ -100,8 +99,10 @@ func (rw *compressRW) readCompressedPacket(unread int) error {
 	// packet payload length
 	payloadLength = int(getUint24(cbuff[0:3]))
 
-	// TODO: verify packet sequence number
-	//seqno = uint8(cbuff[3])
+	// check for out-of-order packets
+	if rw.seqno != cbuff[3] {
+		return myError(ErrNetPacketsOutOfOrder)
+	}
 
 	// length of payload before compression
 	origPayloadLength = int(getUint24(cbuff[4:7]))

@@ -57,6 +57,7 @@ const (
 	ErrInvalidPacket
 	ErrInvalidPropertyValue
 	ErrNetPacketTooLarge
+	ErrNetPacketsOutOfOrder
 )
 
 var errFormat = map[uint16]string{
@@ -78,6 +79,7 @@ var errFormat = map[uint16]string{
 	ErrInvalidPacket:        "Invalid/unexpected packet received",
 	ErrInvalidPropertyValue: "Invalid value for property '%s' (%v)",
 	ErrNetPacketTooLarge:    "Got a packet bigger than MaxAllowedPacket",
+	ErrNetPacketsOutOfOrder: "Got packets out of order",
 }
 
 func myError(code uint16, a ...interface{}) *Error {
