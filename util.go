@@ -31,41 +31,41 @@ import (
 // getUint24 converts 3-byte byte little-endian slice into uint32
 func getUint24(b []byte) uint32 {
 	return uint32(b[0]) |
-		uint32(b[1]<<8) |
-		uint32(b[2]<<16)
+		uint32(b[1])<<8 |
+		uint32(b[2])<<16
 }
 
 // getUint48 converts 6-byte byte little-endian slice into uint64
 func getUint48(b []byte) uint64 {
 	return uint64(b[0]) |
-		uint64(b[1]<<8) |
-		uint64(b[2]<<16) |
-		uint64(b[3]<<16) |
-		uint64(b[4]<<16) |
-		uint64(b[5]<<16)
+		uint64(b[1])<<8 |
+		uint64(b[2])<<16 |
+		uint64(b[3])<<24 |
+		uint64(b[4])<<32 |
+		uint64(b[5])<<40
 }
 
 func getInt16(b []byte) int16 {
 	return int16(b[0]) |
-		int16(b[1])
+		int16(b[1])<<8
 }
 
 func getInt32(b []byte) int32 {
 	return int32(b[0]) |
-		int32(b[1]) |
-		int32(b[2]) |
-		int32(b[3])
+		int32(b[1])<<8 |
+		int32(b[2])<<16 |
+		int32(b[3])<<24
 }
 
 func getInt64(b []byte) int64 {
 	return int64(b[0]) |
-		int64(b[1]) |
-		int64(b[2]) |
-		int64(b[3]) |
-		int64(b[4]) |
-		int64(b[5]) |
-		int64(b[6]) |
-		int64(b[7])
+		int64(b[1])<<8 |
+		int64(b[2])<<16 |
+		int64(b[3])<<24 |
+		int64(b[4])<<32 |
+		int64(b[5])<<40 |
+		int64(b[6])<<48 |
+		int64(b[7])<<56
 }
 
 // putUint24 stores the given uint32 into the specified 3-byte byte slice in little-endian
