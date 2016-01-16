@@ -53,13 +53,15 @@ func dial(address, socket string) (net.Conn, error) {
 // readWriter is a generic interface to read/write protocol packets to/from
 // the network.
 type readWriter interface {
-	// read reads a protocol packet from the network and stores it into the
-	// specified buffer.
-	read(c net.Conn, b []byte) (n int, err error)
+	// init initializes the readWriter
+	init(c *Conn)
 
-	// write writes the protocol packet (content of the specified buffer) to
-	// the network.
-	write(c net.Conn, b []byte) (n int, err error)
+	// read reads the specified number of bytes from the network and stores
+	// them into the specified buffer.
+	read(b []byte, length int) (int, error)
+
+	// write writes the contents of the specified buffer to the network.
+	write([]byte) (int, error)
 
 	// reset can be used to performs some reset operations.
 	reset()
@@ -68,38 +70,73 @@ type readWriter interface {
 // defaultReadWrited implements readWriter for non-compressed network
 // read/write.
 type defaultReadWriter struct {
+	c *Conn
 }
 
-// read reads a protocol packet from the network and stores it into the
-// specified buffer.
-func (rw *defaultReadWriter) read(c net.Conn, b []byte) (int, error) {
-	var (
-		n   int
-		err error
-	)
-
-	if n, err = c.Read(b); err != nil {
-		return n, myError(ErrRead, err)
-	}
-
-	return n, nil
+// init is no-op.
+func (rw *defaultReadWriter) init(c *Conn) {
+	rw.c = c
 }
 
-// write writes the protocol packet (content of the specified buffer) to the
-// network.
-func (rw *defaultReadWriter) write(c net.Conn, b []byte) (int, error) {
-	var (
-		n   int
-		err error
-	)
+// read reads the specified number of bytes from the network and stores them
+// into the connection buffer.
+func (rw *defaultReadWriter) read(b []byte, length int) (int, error) {
+	return rw.c.netRead(b[0:length])
+}
 
-	if n, err = c.Write(b); err != nil {
-		return n, myError(ErrWrite, err)
-	}
-
-	return n, nil
+// write writes the contents of the specified buffer to network.
+func (rw *defaultReadWriter) write(b []byte) (int, error) {
+	return rw.c.netWrite(b)
 }
 
 // reset is no-op.
 func (rw *defaultReadWriter) reset() {
+}
+
+// netRead reads len(b) number of bytes from network and stores into the
+// given buffer.
+func (c *Conn) netRead(b []byte) (int, error) {
+	var (
+		n, cur, end int
+		err         error
+	)
+
+	end = len(b)
+
+	for {
+		if n, err = c.conn.Read(b[cur:end]); err != nil {
+
+			cur += n
+			return cur, myError(ErrRead, err)
+		}
+		cur += n
+		if cur == end {
+			break
+		}
+	}
+
+	return end, nil
+}
+
+// netWrite writes the contents of the given buffer to the network.
+func (c *Conn) netWrite(b []byte) (int, error) {
+	var (
+		n, cur, end int
+		err         error
+	)
+
+	end = len(b)
+
+	for {
+		if n, err = c.conn.Write(b[cur:end]); err != nil {
+			cur += n
+			return cur, myError(ErrWrite, err)
+		}
+		cur += n
+		if cur == end {
+			break
+		}
+	}
+
+	return end, nil
 }

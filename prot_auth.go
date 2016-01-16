@@ -36,7 +36,7 @@ import (
 func (c *Conn) parseGreetingPacket(b []byte) {
 	var (
 		off, n                       int
-		authData                     []byte // authentiication plugin data
+		authData                     []byte // authentication plugin data
 		authDataLength               int
 		authDataOff_1, authDataOff_2 int
 	)
@@ -106,38 +106,50 @@ func (c *Conn) parseGreetingPacket(b []byte) {
 }
 
 // createHandshakeResponsePacket generates the handshake response packet.
-func (c *Conn) createHandshakeResponsePacket() []byte {
+func (c *Conn) createHandshakeResponsePacket() ([]byte, error) {
 	var (
-		authData []byte // auth response data
-		off      int
+		authData           []byte // auth response data
+		b                  []byte
+		off, payloadLength int
+		err                error
 	)
 
-	payloadLength := (4 + 4 + 1 + 23)
+	payloadLength = (4 + 4 + 1 + 23)
 
 	authData = c.authResponseData()
 	payloadLength += c.handshakeResponse2Length(len(authData))
 
-	b := make([]byte, 4+payloadLength)
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
+
 	off += 4 // placeholder for protocol packet header
-
 	off += c.populateHandshakeResponse1(b[off:])
+	off += c.populateHandshakeResponse2(b[off:], authData)
 
-	c.populateHandshakeResponse2(b[off:], authData)
-
-	return b
+	return b[0:off], nil
 }
 
 // createSSLRequestPacket generates the SSL request packet to initiate SSL
 // handshake. It is sent to the server over plain connection after which the
-// communication is switched to SSL.
-func (c *Conn) createSSLRequestPacket() []byte {
-	payloadLength := (4 + 4 + 1 + 23)
+// communication switches to SSL.
+func (c *Conn) createSSLRequestPacket() ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	b := make([]byte, 4+payloadLength)
+	payloadLength = (4 + 4 + 1 + 23)
 
-	c.populateHandshakeResponse1(b[4:])
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
 
-	return b
+	off += 4
+	off += c.populateHandshakeResponse1(b[4:])
+
+	return b[0:off], nil
 }
 
 // populateHandshakeResponse1 populates the specified slice with the
@@ -158,6 +170,7 @@ func (c *Conn) populateHandshakeResponse1(b []byte) int {
 	b[off] = byte(c.clientCharset) // client character set
 	off++
 
+	zerofy(b[off : off+23])
 	off += 23 // reserved (all [0])
 
 	return off
@@ -255,13 +268,19 @@ func (c *Conn) handshake() error {
 
 	if !useSSL {
 		// send plain handshake response packet
-		if err = c.writePacket(c.createHandshakeResponsePacket()); err != nil {
+		if b, err = c.createHandshakeResponsePacket(); err != nil {
+			return err
+		}
+		if err = c.writePacket(b); err != nil {
 			return err
 		}
 	} else {
 		// send SSL request packet (1st part of handshake response
 		// packet)
-		if err = c.writePacket(c.createSSLRequestPacket()); err != nil {
+		if b, err = c.createSSLRequestPacket(); err != nil {
+			return err
+		}
+		if err = c.writePacket(b); err != nil {
 			return err
 		}
 
@@ -273,7 +292,10 @@ func (c *Conn) handshake() error {
 		// <!-- SSL activated -->
 
 		// now send the entire handshake response packet
-		if err = c.writePacket(c.createHandshakeResponsePacket()); err != nil {
+		if b, err = c.createHandshakeResponsePacket(); err != nil {
+			return err
+		}
+		if err = c.writePacket(b); err != nil {
 			return err
 		}
 	}
@@ -295,6 +317,7 @@ func (c *Conn) handshake() error {
 
 	if useCompression { // switch to compression protocol
 		c.rw = &compressRW{}
+		c.rw.init(c)
 		// <!-- Compression activated -->
 	}
 	return nil

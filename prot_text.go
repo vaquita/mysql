@@ -48,15 +48,15 @@ const (
 	_COM_SHUTDOWN
 	_COM_STATISTICS
 	_COM_PROCESS_INFO
-	_COM_CONNECT
+	_ // _COM_CONNECT
 	_ // _COM_PROCESS_KILL
-	_ //_COM_DEBUG
-	_COM_PING
+	_ // _COM_DEBUG
+	_ // _COM_PING
 	_ // _COM_TIME
-	_ //_COM_DELAYED_INSERT
-	_COM_CHANGE_USER
+	_ // _COM_DELAYED_INSERT
+	_ // _COM_CHANGE_USER
 	_COM_BINLOG_DUMP
-	_COM_TABLE_DUMP
+	_ // _COM_TABLE_DUMP
 	_ // _COM_CONNECT_OUT
 	_COM_REGISTER_SLAVE
 	_COM_STMT_PREPARE
@@ -194,105 +194,142 @@ func (c *Conn) reportWarnings() bool {
 //<!-- command phase packets -->
 
 // createComQuit generates the COM_QUIT packet.
-func createComQuit() (b []byte) {
-	var off int
-	payloadLength := 1 // _COM_QUIT
+func (c *Conn) createComQuit() ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	b = make([]byte, 4+payloadLength)
+	payloadLength = 1 // _COM_QUIT
+
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
+
 	off += 4 // placeholder for protocol packet header
 	b[off] = _COM_QUIT
-	return
+	off++
+
+	return b[0:off], nil
 }
 
 // createComInitDb generates the COM_INIT_DB packet.
-func createComInitDb(schema string) []byte {
-	var off int
+func (c *Conn) createComInitDb(schema string) ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 1 + // _COM_INIT_DB
+	payloadLength = 1 + // _COM_INIT_DB
 		len(schema) // length of schema name
 
-	b := make([]byte, 4+payloadLength)
-	off += 4 // placeholder for protocol packet header
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
 
+	off += 4 // placeholder for protocol packet header
 	b[off] = _COM_INIT_DB
 	off++
-
 	off += copy(b[off:], schema)
-	return b
+
+	return b[0:off], nil
 }
 
 // createComQuery generates the COM_QUERY packet.
-func createComQuery(query string) []byte {
-	var off int
+func (c *Conn) createComQuery(query string) ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 1 + // _COM_QUERY
+	payloadLength = 1 + // _COM_QUERY
 		len(query) // length of query
 
-	b := make([]byte, 4+payloadLength)
-	off += 4 // placeholder for protocol packet header
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
 
+	off += 4 // placeholder for protocol packet header
 	b[off] = _COM_QUERY
 	off++
-
 	off += copy(b[off:], query)
-	return b
+
+	return b[0:off], nil
 }
 
 // createComFieldList generates the COM_FILED_LIST packet.
-func createComFieldList(table, fieldWildcard string) []byte {
-	var off int
+func (c *Conn) createComFieldList(table, fieldWildcard string) ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 1 + // _COM_FIELD_LIST
+	payloadLength = 1 + // _COM_FIELD_LIST
 		len(table) + // length of table name
 		1 + // NULL
 		len(fieldWildcard) // length of field wildcard
 
-	b := make([]byte, 4+payloadLength)
-	off += 4 // placeholder for protocol packet header
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
 
+	off += 4 // placeholder for protocol packet header
 	b[off] = _COM_FIELD_LIST
 	off++
-
-	off += copy(b[off:], table)
-	off++
-
+	off += putNullTerminatedString(b[off:], table)
 	off += copy(b[off:], fieldWildcard)
 
-	return b
+	return b[0:off], nil
 }
 
 // createComCreateDb generates the COM_CREATE_DB packet.
-func createComCreateDb(schema string) []byte {
-	var off int
+func (c *Conn) createComCreateDb(schema string) ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 1 + // _COM_CREATE_DB
+	payloadLength = 1 + // _COM_CREATE_DB
 		len(schema) // length of schema name
 
-	b := make([]byte, 4+payloadLength)
-	off += 4 // placeholder for protocol packet header
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
 
+	off += 4 // placeholder for protocol packet header
 	b[off] = _COM_CREATE_DB
 	off++
-
 	off += copy(b[off:], schema)
-	return b
+
+	return b[0:off], nil
 }
 
 // createComDropDb generates the COM_DROP_DB packet.
-func createComDropDb(schema string) []byte {
-	var off int
+func (c *Conn) createComDropDb(schema string) ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 1 + // _COM_DROP_DB
+	payloadLength = 1 + // _COM_DROP_DB
 		len(schema) // length of schema name
 
-	b := make([]byte, 4+payloadLength)
-	off += 4 // placeholder for protocol packet header
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
 
+	off += 4 // placeholder for protocol packet header
 	b[off] = _COM_DROP_DB
 	off++
-
 	off += copy(b[off:], schema)
-	return b
+
+	return b[0:off], nil
 }
 
 // refresh flags (exported)
@@ -308,20 +345,27 @@ const (
 )
 
 // createComRefresh generates COM_REFRESH packet.
-func createComRefresh(subCommand uint8) []byte {
-	var off int
+func (c *Conn) createComRefresh(subCommand uint8) ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 1 + // _COM_REFRESH
+	payloadLength = 1 + // _COM_REFRESH
 		1 // subCommand length
 
-	b := make([]byte, 4+payloadLength)
-	off += 4 // placeholder for protocol packet header
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
 
+	off += 4 // placeholder for protocol packet header
 	b[off] = _COM_REFRESH
 	off++
 	b[off] = subCommand
 	off++
-	return b
+
+	return b[0:off], nil
 }
 
 type MyShutdownLevel uint8
@@ -331,7 +375,7 @@ const (
 	SHUTDOWN_DEFAULT               MyShutdownLevel = 0x00
 	SHUTDOWN_WAIT_CONNECTIONS      MyShutdownLevel = 0x01
 	SHUTDOWN_WAIT_TRANSACTIONS     MyShutdownLevel = 0x02
-	SHUTDOWN_WAIT__UPDATES         MyShutdownLevel = 0x08
+	SHUTDOWN_WAIT_UPDATES          MyShutdownLevel = 0x08
 	SHUTDOWN_WAIT_ALL_BUFFERS      MyShutdownLevel = 0x10
 	SHUTDOWN_WAIT_CRITICAL_BUFFERS MyShutdownLevel = 0x11
 	SHUTDOWN_KILL_QUERY            MyShutdownLevel = 0xfe
@@ -339,48 +383,69 @@ const (
 )
 
 // createComShutdown generates COM_SHUTDOWN packet.
-func createComShutdown(level MyShutdownLevel) []byte {
-	var off int
+func (c *Conn) createComShutdown(level MyShutdownLevel) ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 1 + // _COM_SHUTDOWN
+	payloadLength = 1 + // _COM_SHUTDOWN
 		1 // shutdown level length
 
-	b := make([]byte, 4+payloadLength)
-	off += 4 // placeholder for protocol packet header
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
 
+	off += 4 // placeholder for protocol packet header
 	b[off] = _COM_SHUTDOWN
 	off++
 	b[off] = byte(level)
 	off++
-	return b
+
+	return b[0:off], nil
 }
 
 // createComStatistics generates COM_STATISTICS packet.
-func createComStatistics() []byte {
-	var off int
+func (c *Conn) createComStatistics() ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 1 // _COM_STATISTICS
+	payloadLength = 1 // _COM_STATISTICS
 
-	b := make([]byte, 4+payloadLength)
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
+
 	off += 4 // placeholder for protocol packet header
-
 	b[off] = _COM_STATISTICS
 	off++
 
-	return b
+	return b[0:off], nil
 }
 
 // createComProcessInfo generates COM_PROCESS_INFO packet.
-func createComProcessInfo() []byte {
-	var off int
+func (c *Conn) createComProcessInfo() ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 1 // _COM_PROCESS_INFO
+	payloadLength = 1 // _COM_PROCESS_INFO
 
-	b := make([]byte, 4+payloadLength)
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
+
 	off += 4 // placeholder for protocol packet header
-
 	b[off] = _COM_PROCESS_INFO
-	return b
+	off++
+
+	return b[0:off], nil
 }
 
 // parseColumnDefinitionPacket parses the column (field) definition packet.
@@ -426,11 +491,20 @@ func parseColumnDefinitionPacket(b []byte, isComFieldList bool) *columnDefinitio
 
 // handleExec handles COM_QUERY and related packets for Conn's Exec()
 func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, error) {
+	var (
+		b   []byte
+		err error
+	)
+
 	// reset the protocol packet sequence number
 	c.resetSeqno()
 
+	if b, err = c.createComQuery(replacePlaceholders(query, args)); err != nil {
+		return nil, err
+	}
+
 	// send COM_QUERY to the server
-	if err := c.writePacket(createComQuery(replacePlaceholders(query, args))); err != nil {
+	if err := c.writePacket(b); err != nil {
 		return nil, err
 	}
 
@@ -439,11 +513,20 @@ func (c *Conn) handleExec(query string, args []driver.Value) (driver.Result, err
 
 // handleQuery handles COM_QUERY and related packets for Conn's Query()
 func (c *Conn) handleQuery(query string, args []driver.Value) (driver.Rows, error) {
+	var (
+		b   []byte
+		err error
+	)
+
 	// reset the protocol packet sequence number
 	c.resetSeqno()
 
+	if b, err = c.createComQuery(replacePlaceholders(query, args)); err != nil {
+		return nil, err
+	}
+
 	// send COM_QUERY to the server
-	if err := c.writePacket(createComQuery(replacePlaceholders(query, args))); err != nil {
+	if err := c.writePacket(b); err != nil {
 		return nil, err
 	}
 
@@ -453,8 +536,8 @@ func (c *Conn) handleQuery(query string, args []driver.Value) (driver.Rows, erro
 func (c *Conn) handleExecResponse() (*Result, error) {
 	var (
 		err  error
-		b    []byte
 		warn bool
+		b    []byte
 	)
 
 	if b, err = c.readPacket(); err != nil {
@@ -462,7 +545,6 @@ func (c *Conn) handleExecResponse() (*Result, error) {
 	}
 
 	switch b[0] {
-
 	case _PACKET_ERR: // expected
 		// handle err packet
 		c.parseErrPacket(b)
@@ -500,8 +582,8 @@ func (c *Conn) handleExecResponse() (*Result, error) {
 func (c *Conn) handleQueryResponse() (*Rows, error) {
 	var (
 		err  error
-		b    []byte
 		warn bool
+		b    []byte
 	)
 
 	if b, err = c.readPacket(); err != nil {
@@ -619,10 +701,19 @@ func (c *Conn) handleResultSetRow(b []byte, rs *Rows) *row {
 }
 
 func (c *Conn) handleQuit() error {
+	var (
+		b   []byte
+		err error
+	)
+
 	// reset the protocol packet sequence number
 	c.resetSeqno()
 
-	return c.writePacket(createComQuit())
+	if b, err = c.createComQuit(); err != nil {
+		return err
+	}
+
+	return c.writePacket(b)
 }
 
 // stringify converts the given argument of arbitrary type to string. 'quote'
@@ -691,13 +782,13 @@ func replacePlaceholders(query string, args []driver.Value) string {
 
 func (c *Conn) handleInfileRequest(filename string) error {
 	var (
-		b              []byte
 		err, savedErr  error
 		errSaved, warn bool
+		b              []byte
 	)
 
 	// do not skip on error to avoid "packets out of order"
-	if b, err = createInfileDataPacket(filename); err != nil {
+	if b, err = c.createInfileDataPacket(filename); err != nil {
 		savedErr = err
 		errSaved = true
 		goto L
@@ -709,7 +800,11 @@ func (c *Conn) handleInfileRequest(filename string) error {
 
 L:
 	// send an empty packet
-	if err = c.writePacket(createEmptyPacket()); err != nil {
+	if b, err = c.createEmptyPacket(); err != nil {
+		return err
+	}
+
+	if err = c.writePacket(b); err != nil {
 		return err
 	}
 
@@ -746,11 +841,13 @@ L:
 
 // createInfileDataPacket generates a packet containing contents of the
 // requested local file
-func createInfileDataPacket(filename string) ([]byte, error) {
+func (c *Conn) createInfileDataPacket(filename string) ([]byte, error) {
 	var (
-		f   *os.File
-		fi  os.FileInfo
-		err error
+		f      *os.File
+		fi     os.FileInfo
+		b      []byte
+		off, n int
+		err    error
 	)
 
 	if f, err = os.Open(filename); err != nil {
@@ -762,16 +859,34 @@ func createInfileDataPacket(filename string) ([]byte, error) {
 		return nil, myError(ErrFile, err)
 	}
 
-	b := make([]byte, 4+fi.Size())
+	if b, err = c.buff.Reset(4 + int(fi.Size())); err != nil {
+		return nil, err
+	}
 
-	if _, err = f.Read(b[4:]); err != nil {
+	off += 4 // placeholder for protocol packet header
+
+	if n, err = f.Read(b[off:]); err != nil {
 		return nil, myError(ErrFile, err)
 	}
 
-	return b, nil
+	off += n
+
+	return b[0:off], nil
 }
 
 // createEmptyPacket generates an empty packet.
-func createEmptyPacket() []byte {
-	return make([]byte, 4)
+func (c *Conn) createEmptyPacket() ([]byte, error) {
+	var (
+		b   []byte
+		off int
+		err error
+	)
+
+	if b, err = c.buff.Reset(4); err != nil {
+		return nil, err
+	}
+
+	off += 4 // placeholder for protocol packet header
+
+	return b[0:off], nil
 }

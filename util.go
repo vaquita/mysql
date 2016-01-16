@@ -178,7 +178,8 @@ func getNullTerminatedString(b []byte) (v string, n int) {
 
 func putNullTerminatedString(b []byte, v string) (n int) {
 	n = copy(b, v)
-	n++ // null terminator
+	b[n] = 0 // null terminator
+	n++
 	return
 }
 
@@ -206,4 +207,11 @@ func setBitCount(bitmap []byte) uint16 {
 		}
 	}
 	return count
+}
+
+// zerofy sets all bytes of the given slice to 0.
+func zerofy(b []byte) {
+	for i := 0; i < len(b); i++ {
+		b[i] = 0
+	}
 }

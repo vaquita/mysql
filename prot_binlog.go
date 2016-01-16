@@ -114,13 +114,22 @@ func (nr *netReader) begin(index binlogIndex) error {
 }
 
 func (nr *netReader) binlogDump(index binlogIndex) error {
-	var err error
+	var (
+		b   []byte
+		err error
+	)
+
+	c := nr.conn
 
 	// reset the protocol packet sequence number
-	nr.conn.resetSeqno()
+	c.resetSeqno()
+
+	if b, err = c.createComBinlogDump(nr.slave, index, nr.nonBlocking); err != nil {
+		return err
+	}
 
 	// send COM_BINLOG_DUMP packet to (master) server
-	if err = nr.conn.writePacket(createComBinlogDump(nr.slave, index, nr.nonBlocking)); err != nil {
+	if err = c.writePacket(b); err != nil {
 		return err
 	}
 
@@ -147,29 +156,35 @@ func (nr *netReader) registerSlave() error {
 		b   []byte
 	)
 
-	// reset the protocol packet sequence number
-	nr.conn.resetSeqno()
+	c := nr.conn
 
-	// send COM_REGISTER_SLAVE packet to (master) server
-	if err = nr.conn.writePacket(createComRegisterSlave(nr.slave)); err != nil {
+	// reset the protocol packet sequence number
+	c.resetSeqno()
+
+	if b, err = c.createComRegisterSlave(nr.slave); err != nil {
 		return err
 	}
 
-	if b, err = nr.conn.readPacket(); err != nil {
+	// send COM_REGISTER_SLAVE packet to (master) server
+	if err = c.writePacket(b); err != nil {
+		return err
+	}
+
+	if b, err = c.readPacket(); err != nil {
 		return err
 	}
 
 	switch b[0] {
 	case _PACKET_OK: //expected
 		// parse OK packet
-		if warn := nr.conn.parseOkPacket(b); warn {
-			return &nr.conn.e
+		if warn := c.parseOkPacket(b); warn {
+			return &c.e
 		}
 
 	case _PACKET_ERR: //expected
 		// parse err packet
-		nr.conn.parseErrPacket(b)
-		return &nr.conn.e
+		c.parseErrPacket(b)
+		return &c.e
 
 	default: // unexpected
 		return myError(ErrInvalidPacket)
@@ -206,15 +221,19 @@ func (nr *netReader) error() error {
 	return nr.e
 }
 
-func createComRegisterSlave(s binlogSlave) (b []byte) {
+func (c *Conn) createComRegisterSlave(s binlogSlave) ([]byte, error) {
 	var (
-		off           int
-		payloadLength int
+		b                  []byte
+		off, payloadLength int
+		err                error
 	)
 
 	payloadLength = 18 + len(s.host) + len(s.username) + len(s.password)
 
-	b = make([]byte, 4+payloadLength)
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
+
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = _COM_REGISTER_SLAVE
@@ -247,14 +266,23 @@ func createComRegisterSlave(s binlogSlave) (b []byte) {
 	binary.LittleEndian.PutUint32(b[off:off+4], s.masterId)
 	off += 4
 
-	return
+	return b[0:off], nil
 }
 
-func createComBinlogDump(slave binlogSlave, index binlogIndex, nonBlocking bool) (b []byte) {
-	var off int
-	payloadLength := 11 + len(index.file)
+func (c *Conn) createComBinlogDump(slave binlogSlave, index binlogIndex,
+	nonBlocking bool) ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	b = make([]byte, 4+payloadLength)
+	payloadLength = 11 + len(index.file)
+
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
+
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = _COM_BINLOG_DUMP
@@ -275,7 +303,7 @@ func createComBinlogDump(slave binlogSlave, index binlogIndex, nonBlocking bool)
 
 	off += copy(b[off:], index.file)
 
-	return
+	return b[0:off], nil
 }
 
 func parseEventHeader(b []byte) (eventHeader, int) {
@@ -306,7 +334,9 @@ func (nr *netReader) readEvent() error {
 		b   []byte
 	)
 
-	if b, err = nr.conn.readPacket(); err != nil {
+	c := nr.conn
+
+	if b, err = c.readPacket(); err != nil {
 		return err
 	}
 
@@ -317,14 +347,14 @@ func (nr *netReader) readEvent() error {
 
 	case _PACKET_ERR: //expected
 		// handle err packet
-		nr.conn.parseErrPacket(b)
+		c.parseErrPacket(b)
 
-		return &nr.conn.e
+		return &c.e
 
 	case _PACKET_EOF: // expected
-		if warn := nr.conn.parseEOFPacket(b); warn {
+		if warn := c.parseEOFPacket(b); warn {
 			// save warning (if any)
-			nr.e = &nr.conn.e
+			nr.e = &c.e
 		}
 		return io.EOF
 

@@ -45,6 +45,10 @@ const (
 		_CLIENT_PLUGIN_AUTH)
 )
 
+const (
+	_MAX_PACKET_SIZE_MAX = 1024 * 1024 * 1024 // 1GB
+)
+
 type properties struct {
 	scheme             string // mysql or file (for binlog files)
 	file               string // file://<binlog file>
@@ -120,6 +124,10 @@ func (p *properties) parseUrl(dsn string) error {
 			return myError(ErrInvalidProperty, "MaxAllowedPacket", err)
 		} else {
 			p.maxPacketSize = uint32(v)
+			if p.maxPacketSize > _MAX_PACKET_SIZE_MAX {
+				return myError(ErrInvalidPropertyValue, "MaxAllowedPacket",
+					p.maxPacketSize)
+			}
 		}
 	} else {
 		p.maxPacketSize = _DEFAULT_MAX_PACKET_SIZE

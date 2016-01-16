@@ -32,31 +32,34 @@ import (
 )
 
 // createComStmtPrepare generates the COM_STMT_PREPARE packet.
-func createComStmtPrepare(query string) []byte {
+func (c *Conn) createComStmtPrepare(query string) ([]byte, error) {
 	var (
-		off int
+		b                  []byte
+		off, payloadLength int
+		err                error
 	)
 
-	payloadLength := 1 + // _COM_STMT_PREPARE
+	payloadLength = 1 + // _COM_STMT_PREPARE
 		len(query) // length of query
 
-	b := make([]byte, 4+payloadLength)
-	off += 4 // placeholder for protocol packet header
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
 
+	off += 4 // placeholder for protocol packet header
 	b[off] = _COM_STMT_PREPARE
 	off++
-
 	off += copy(b[off:], query)
-	return b
+
+	return b[0:off], nil
 }
 
 // createComStmtExecute generates the COM_STMT_EXECUTE packet.
-func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
+func (c *Conn) createComStmtExecute(s *Stmt, args []driver.Value) ([]byte, error) {
 	var (
-		nullBitmap     []byte
-		nullBitmapSize int
-		paramCount     int
-		off            int
+		b, nullBitmap                                  []byte
+		off, payloadLength, nullBitmapSize, paramCount int
+		err                                            error
 	)
 
 	// TODO : assert(s.paramCount == len(args))
@@ -65,7 +68,12 @@ func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
 	// null bitmap, size = (paramCount + 7) / 8
 	nullBitmapSize = int((paramCount + 7) / 8)
 
-	b := make([]byte, 4+comStmtExecutePayloadLength(s, args))
+	payloadLength = int(comStmtExecutePayloadLength(s, args))
+
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
+
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = _COM_STMT_EXECUTE
@@ -82,6 +90,8 @@ func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
 
 	if paramCount > 0 {
 		nullBitmap = b[off : off+nullBitmapSize]
+		// clear the null bitmap
+		zerofy(nullBitmap)
 		off += nullBitmapSize
 
 		b[off] = s.newParamsBoundFlag
@@ -139,16 +149,23 @@ func createComStmtExecute(s *Stmt, args []driver.Value) []byte {
 		}
 	}
 
-	return b
+	return b[0:off], nil
 }
 
 // createComStmtClose generates the COM_STMT_CLOSE packet.
-func createComStmtClose(sid uint32) []byte {
-	var off int
+func (c *Conn) createComStmtClose(sid uint32) ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 5 // _COM_STMT_CLOSE(1) + s.id(4)
+	payloadLength = 5 // _COM_STMT_CLOSE(1) + s.id(4)
 
-	b := make([]byte, 4+payloadLength)
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
+
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = _COM_STMT_CLOSE
@@ -157,16 +174,23 @@ func createComStmtClose(sid uint32) []byte {
 	binary.LittleEndian.PutUint32(b[off:off+4], sid)
 	off += 4
 
-	return b
+	return b[0:off], nil
 }
 
 // createComStmtReset generates the COM_STMT_RESET packet.
-func createComStmtReset(s *Stmt) []byte {
-	var off int
+func (c *Conn) createComStmtReset(s *Stmt) ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 5 // _COM_STMT_RESET (1) + s.id (4)
+	payloadLength = 5 // _COM_STMT_RESET (1) + s.id (4)
 
-	b := make([]byte, 4+payloadLength)
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
+
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = _COM_STMT_RESET
@@ -175,17 +199,24 @@ func createComStmtReset(s *Stmt) []byte {
 	binary.LittleEndian.PutUint32(b[off:off+4], s.id)
 	off += 4
 
-	return b
+	return b[0:off], nil
 }
 
 // createComStmtSendLongData generates the COM_STMT_SEND_LONG_DATA packet.
-func createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) []byte {
-	var off int
+func (c *Conn) createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) ([]byte, error) {
+	var (
+		b                  []byte
+		off, payloadLength int
+		err                error
+	)
 
-	payloadLength := 7 + // _COM_STMT_SEND_LONG_DATA(1) + s.id(4) + paramId(2)
+	payloadLength = 7 + // _COM_STMT_SEND_LONG_DATA(1) + s.id(4) + paramId(2)
 		len(data) // length of data
 
-	b := make([]byte, 4+payloadLength)
+	if b, err = c.buff.Reset(4 + payloadLength); err != nil {
+		return nil, err
+	}
+
 	off += 4 // placeholder for protocol packet header
 
 	b[off] = _COM_STMT_SEND_LONG_DATA
@@ -196,18 +227,25 @@ func createComStmtSendLongData(s *Stmt, paramId uint16, data []byte) []byte {
 	binary.LittleEndian.PutUint16(b[off:off+2], paramId)
 	off += 2
 
-	return b
+	return b[0:off], nil
 }
 
 // handleStmtPrepare handles COM_STMT_PREPARE and related packets
 func (c *Conn) handleStmtPrepare(query string) (*Stmt, error) {
-	var err error
+	var (
+		b   []byte
+		err error
+	)
 
 	// reset the protocol packet sequence number
 	c.resetSeqno()
 
+	if b, err = c.createComStmtPrepare(query); err != nil {
+		return nil, err
+	}
+
 	// write COM_STMT_PREPARE packet
-	if err = c.writePacket(createComStmtPrepare(query)); err != nil {
+	if err = c.writePacket(b); err != nil {
 		return nil, err
 	}
 
@@ -251,6 +289,7 @@ func (c *Conn) handleComStmtPrepareResponse() (*Stmt, error) {
 		if b, err = c.readPacket(); err != nil {
 			return nil, err
 		}
+
 		switch b[0] {
 		case _PACKET_EOF: // EOF packet, done!
 			warn = c.parseEOFPacket(b)
@@ -266,6 +305,7 @@ func (c *Conn) handleComStmtPrepareResponse() (*Stmt, error) {
 		if b, err = c.readPacket(); err != nil {
 			return nil, err
 		}
+
 		switch b[0] {
 		case _PACKET_EOF: // EOF packet, done!
 			warn = c.parseEOFPacket(b)
@@ -303,7 +343,10 @@ func (s *Stmt) parseStmtPrepareOkPacket(b []byte) bool {
 
 // handleExec handles COM_STMT_EXECUTE and related packets for Stmt's Exec()
 func (s *Stmt) handleExec(args []driver.Value) (*Result, error) {
-	var err error
+	var (
+		b   []byte
+		err error
+	)
 
 	// reset the protocol packet sequence number
 	s.c.resetSeqno()
@@ -311,8 +354,12 @@ func (s *Stmt) handleExec(args []driver.Value) (*Result, error) {
 	// TODO: set me appropriately
 	s.newParamsBoundFlag = 1
 
+	if b, err = s.c.createComStmtExecute(s, args); err != nil {
+		return nil, err
+	}
+
 	// send COM_STMT_EXECUTE to the server
-	if err = s.c.writePacket(createComStmtExecute(s, args)); err != nil {
+	if err = s.c.writePacket(b); err != nil {
 		return nil, err
 	}
 
@@ -321,14 +368,23 @@ func (s *Stmt) handleExec(args []driver.Value) (*Result, error) {
 
 // handleExecute handles COM_STMT_EXECUTE and related packets for Stmt's Query()
 func (s *Stmt) handleQuery(args []driver.Value) (*Rows, error) {
+	var (
+		b   []byte
+		err error
+	)
+
 	// reset the protocol packet sequence number
 	s.c.resetSeqno()
 
 	// TODO: set me appropriately
 	s.newParamsBoundFlag = 1
 
+	if b, err = s.c.createComStmtExecute(s, args); err != nil {
+		return nil, err
+	}
+
 	// send COM_STMT_EXECUTE to the server
-	if err := s.c.writePacket(createComStmtExecute(s, args)); err != nil {
+	if err := s.c.writePacket(b); err != nil {
 		return nil, err
 	}
 
@@ -953,11 +1009,20 @@ func writeTime(b []byte, v time.Duration) int {
 
 // handleClose handles COM_STMT_CLOSE and related packets
 func (s *Stmt) handleClose() error {
+	var (
+		b   []byte
+		err error
+	)
+
 	// reset the protocol packet sequence number
 	s.c.resetSeqno()
 
+	if b, err = s.c.createComStmtClose(s.id); err != nil {
+		return err
+	}
+
 	// write COM_STMT_CLOSE packet
-	if err := s.c.writePacket(createComStmtClose(s.id)); err != nil {
+	if err := s.c.writePacket(b); err != nil {
 		return err
 	}
 

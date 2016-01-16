@@ -55,25 +55,29 @@ const (
 	ErrCursor
 	ErrFile
 	ErrInvalidPacket
+	ErrInvalidPropertyValue
+	ErrNetPacketTooLarge
 )
 
 var errFormat = map[uint16]string{
-	ErrWarning:            "Execution of last statement resulted in warning(s)",
-	ErrUnknown:            "Unknown error",
-	ErrConnection:         "Can't connect to the server (%s)",
-	ErrRead:               "Can't read data from connection (%s)",
-	ErrWrite:              "Can't write data to connection (%s)",
-	ErrSSLSupport:         "Server does not support SSL connection",
-	ErrSSLConnection:      "Can't establish SSL connection with the server (%s)",
-	ErrCompressionSupport: "Server does not support packet compression",
-	ErrCompression:        "Compression error (%s)",
-	ErrInvalidType:        "Invalid type (%s)",
-	ErrInvalidDSN:         "Can't parse data source name (%s)",
-	ErrInvalidProperty:    "Invalid value for property '%s' (%s)",
-	ErrScheme:             "Unsupported scheme '%s'",
-	ErrCursor:             "Cursor is closed",
-	ErrFile:               "File operation failed (%s)",
-	ErrInvalidPacket:      "Invalid/unexpected packet received",
+	ErrWarning:              "Execution of last statement resulted in warning(s)",
+	ErrUnknown:              "Unknown error",
+	ErrConnection:           "Can't connect to the server (%s)",
+	ErrRead:                 "Can't read data from connection (%s)",
+	ErrWrite:                "Can't write data to connection (%s)",
+	ErrSSLSupport:           "Server does not support SSL connection",
+	ErrSSLConnection:        "Can't establish SSL connection with the server (%s)",
+	ErrCompressionSupport:   "Server does not support packet compression",
+	ErrCompression:          "Compression error (%s)",
+	ErrInvalidType:          "Invalid type (%s)",
+	ErrInvalidDSN:           "Can't parse data source name (%s)",
+	ErrInvalidProperty:      "Invalid property '%s'",
+	ErrScheme:               "Unsupported scheme '%s'",
+	ErrCursor:               "Cursor is closed",
+	ErrFile:                 "File operation failed (%s)",
+	ErrInvalidPacket:        "Invalid/unexpected packet received",
+	ErrInvalidPropertyValue: "Invalid value for property '%s' (%v)",
+	ErrNetPacketTooLarge:    "Got a packet bigger than MaxAllowedPacket",
 }
 
 func myError(code uint16, a ...interface{}) *Error {

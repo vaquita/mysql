@@ -28,11 +28,16 @@ import (
 	"net"
 )
 
+const (
+	_INITIAL_PACKET_BUFFER_SIZE = 4 * 1024 //  4KB
+)
+
 type Conn struct {
 	// connection properties
 	p properties
 
 	conn  net.Conn
+	buff  buffer
 	rw    readWriter
 	seqno uint8 // packet sequence number
 
@@ -64,9 +69,14 @@ func open(p properties) (*Conn, error) {
 	c.rw = &defaultReadWriter{}
 	c.p = p
 
+	// initialize the connection buffer
+	c.buff.New(_INITIAL_PACKET_BUFFER_SIZE)
+
 	// open a connection with the server
 	if c.conn, err = dial(p.address, p.socket); err != nil {
 		return nil, err
+	} else {
+		c.rw.init(c)
 	}
 
 	// perform handshake
@@ -77,42 +87,69 @@ func open(p properties) (*Conn, error) {
 	return c, nil
 }
 
-// readPacket reads the next protocol packet from the network and returns the
-// payload after increment the packet sequence number.
+// readPacket reads the next available protocol packet from the network into
+// the connection buffer. It also increments the packet sequence number.
 func (c *Conn) readPacket() ([]byte, error) {
-	var err error
+	var (
+		err           error
+		b             []byte
+		payloadLength int
+	)
 
 	// first read the packet header
-	header := make([]byte, 4)
-	if _, err = c.rw.read(c.conn, header); err != nil {
+
+	// reset the connection buffer
+	if b, err = c.buff.Reset(4); err != nil {
+		return nil, err
+	}
+	if _, err = c.rw.read(b, 4); err != nil {
 		return nil, err
 	}
 
 	// payload length
-	payloadLength := getUint24(header[0:3])
+	payloadLength = int(getUint24(b[0:3]))
+
+	// error out in case the packet is too big.
+	// if compression is enabled, we check it in readCompressedPacket().
+	if c.p.clientCapabilities&_CLIENT_COMPRESS == 0 &&
+		payloadLength+4 > int(c.p.maxPacketSize) {
+		return nil, myError(ErrNetPacketTooLarge)
+	}
+
+	// TODO: check out-of-order packet
 
 	// increment the packet sequence number
 	c.seqno++
 
-	// finally, read the payload
-	payload := make([]byte, payloadLength)
-	if _, err = c.rw.read(c.conn, payload); err != nil {
+	// finally, read the payload (note: the header gets overwritten)
+
+	// reset the connection buffer
+	if b, err = c.buff.Reset(payloadLength); err != nil {
 		return nil, err
 	}
-	return payload, nil
+	if _, err = c.rw.read(b, payloadLength); err != nil {
+		return nil, err
+	}
+
+	return b[0:payloadLength], nil
 }
 
-// writePacket accepts the protocol packet to be written, populates the header
-// and writes it to the network.
+// writePacket populates the specified packet buffer with header and writes it
+// to the network.
 func (c *Conn) writePacket(b []byte) error {
-	var err error
+	var (
+		err           error
+		payloadLength int
+	)
+
+	payloadLength = len(b) - 4
 
 	// populate the packet header
-	putUint24(b[0:3], uint32(len(b)-4)) // payload length
-	b[3] = c.seqno                      // packet sequence number
+	putUint24(b[0:3], uint32(payloadLength)) // payload length
+	b[3] = c.seqno                           // packet sequence number
 
 	// write it to the connection
-	if _, err = c.rw.write(c.conn, b); err != nil {
+	if _, err = c.rw.write(b); err != nil {
 		return err
 	}
 
