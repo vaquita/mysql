@@ -1106,7 +1106,9 @@ func (fr *fileReader) next() bool {
 		fr.first = false
 	} else if err = fr.readEvent(); err != nil { // read the next event
 		fr.eof = true
-		// TODO: save error
+		if err != io.EOF {
+			fr.e = err
+		}
 		return false
 	}
 	return true
@@ -1138,12 +1140,7 @@ func (fr *fileReader) readEvent() error {
 	// read the binlog header
 	headerBuf = make([]byte, 19)
 	if _, err = fr.file.Read(headerBuf); err != nil {
-		if err == io.EOF {
-			fr.eof = true
-			return nil
-		} else {
-			return myError(ErrFile, err)
-		}
+		goto E
 	}
 
 	header, _ = parseEventHeader(headerBuf)
@@ -1152,12 +1149,7 @@ func (fr *fileReader) readEvent() error {
 	bodyBuf = make([]byte, header.size-19)
 	_, err = fr.file.Read(bodyBuf)
 	if err != nil {
-		if err == io.EOF {
-			fr.eof = true
-			return nil
-		} else {
-			return myError(ErrFile, err)
-		}
+		goto E
 	}
 
 	// combine both the buffers
@@ -1167,6 +1159,13 @@ func (fr *fileReader) readEvent() error {
 
 	fr.nextEvent = eventBuf
 	return nil
+
+E:
+	if err == io.EOF {
+		return err
+	} else {
+		return myError(ErrFile, err)
+	}
 }
 
 func (fr *fileReader) error() error {
