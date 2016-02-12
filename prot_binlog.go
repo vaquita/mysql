@@ -42,6 +42,11 @@ const (
 	_LOG_EVENT_SKIP_REPLICATION_F = 0x8000
 )
 
+const (
+	_EVENT_TYPE_OFFSET = 4
+	_FLAGS_OFFSET      = 17
+)
+
 type netReader struct {
 	conn        *Conn
 	slave       binlogSlave
@@ -84,6 +89,13 @@ func (nr *netReader) init(p properties) error {
 	if nr.conn, err = open(p); err != nil {
 		nr.closed = true
 		return err
+	}
+
+	// notify master about checksum awareness
+	if p.binlogVerifyChecksum {
+		if err = notifyChecksumAwareness(nr.conn); err != nil {
+			return err
+		}
 	}
 
 	// send COM_REGISTER_SLAVE to (master) server
@@ -195,6 +207,9 @@ func (nr *netReader) registerSlave() error {
 
 func (nr *netReader) next() bool {
 	var err error
+
+	// reset last error
+	nr.e = nil
 
 	if nr.closed || nr.eof {
 		return false
@@ -655,8 +670,14 @@ func (b *Binlog) parseFormatDescriptionEvent(buf []byte, ev *FormatDescriptionEv
 	ev.commonHeaderLength = uint8(buf[off])
 	off++
 
+	// TODO: check server version and/or binlog version to see if it
+	// supports event checksum. For now consider and store rest of
+	// unread buffer to postHeaderLength.
 	ev.postHeaderLength = buf[off:]
 
+	// Checksum algorithm descriptor (1 byte), its placed right before the
+	// checksum value (4 bytes), excluded by the caller
+	ev.checksumAlg = uint8(ev.postHeaderLength[len(ev.postHeaderLength)-1])
 	return
 }
 
@@ -1097,6 +1118,9 @@ func (fr *fileReader) close() error {
 
 func (fr *fileReader) next() bool {
 	var err error
+
+	// reset last error
+	fr.e = nil
 
 	if fr.eof {
 		return false

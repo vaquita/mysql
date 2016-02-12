@@ -43,6 +43,7 @@ const (
 		_CLIENT_SECURE_CONNECTION |
 		_CLIENT_MULTI_RESULTS |
 		_CLIENT_PLUGIN_AUTH)
+	_DEFAULT_BINLOG_VERIFY_CHECKSUM = false
 )
 
 const (
@@ -70,6 +71,8 @@ type properties struct {
 	binlogSlaveId uint32 // used while registering as slave
 	// send EOF packet instead of blocking if no more events are left
 	binlogDumpNonBlock bool
+	// verify checksum of binary log events
+	binlogVerifyChecksum bool
 }
 
 func (p *properties) parseUrl(dsn string) error {
@@ -90,7 +93,6 @@ func (p *properties) parseUrl(dsn string) error {
 
 	if p.scheme == "file" {
 		p.file = u.Path
-		return nil
 	}
 
 	if u.User != nil {
@@ -187,6 +189,17 @@ func (p *properties) parseUrl(dsn string) error {
 		} else {
 			p.binlogDumpNonBlock = v
 		}
+	}
+
+	// BinlogVerifyChecksum
+	if val := query.Get("BinlogVerifyChecksum"); val != "" {
+		if v, err := strconv.ParseBool(val); err != nil {
+			return myError(ErrInvalidProperty, "BinlogVerifyChecksum", err)
+		} else {
+			p.binlogVerifyChecksum = v
+		}
+	} else {
+		p.binlogVerifyChecksum = _DEFAULT_BINLOG_VERIFY_CHECKSUM
 	}
 
 	return nil
