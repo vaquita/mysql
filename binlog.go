@@ -208,6 +208,7 @@ func (b *Binlog) RawEvent() (re RawEvent, err error) {
 	case FORMAT_DESCRIPTION_EVENT:
 		ev := new(FormatDescriptionEvent)
 
+		end -= _BINLOG_CHECKSUM_LENGTH
 		b.parseFormatDescriptionEvent(re.body[off:end], ev)
 
 		// now that we have parsed FORMAT_DESCRIPTION_EVENT, we can
@@ -415,6 +416,7 @@ func (re *RawEvent) Event() Event {
 		// number of events
 		ev.postHeaderLength = make([]byte, len(desc.postHeaderLength))
 		copy(ev.postHeaderLength, desc.postHeaderLength)
+		ev.checksumAlg = desc.checksumAlg
 		return ev
 
 	case XID_EVENT:

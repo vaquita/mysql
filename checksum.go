@@ -56,7 +56,7 @@ func (c *checksumOff) test(ev []byte) bool {
 type checksumCRC32IEEE struct{}
 
 func (c *checksumCRC32IEEE) algorithm() uint8 {
-	return BINLOG_CHECKSUM_ALG_OFF
+	return BINLOG_CHECKSUM_ALG_CRC32
 }
 
 // test verifies the checksum for an event and returns true if it
