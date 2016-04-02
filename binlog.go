@@ -1638,7 +1638,7 @@ func (e *GtidEvent) Position() uint32 {
 }
 
 func (e *GtidEvent) String() string {
-	return fmt.Sprintf("%d:%d:%d", e.gtid.domainId, e.header.serverId,
+	return fmt.Sprintf("%d-%d-%d", e.gtid.domainId, e.header.serverId,
 		e.gtid.seqno)
 }
 
