@@ -777,6 +777,12 @@ func (b *Binlog) parseTableMapEvent(buf []byte, ev *TableMapEvent) (err error) {
 
 	// field meta data
 	var meta uint16
+
+	_, length = getLenencInt(buf[off:])
+	off += length
+
+	// read meta data and store them into the respective columns
+	// TODO: verify that buffer consumed is equal to the meta data size
 	for i = 0; i < ev.columnCount; i++ {
 		switch getMetaDataSize(ev.columns[i].type_) {
 		case 2:
@@ -805,24 +811,12 @@ func (b *Binlog) parseTableMapEvent(buf []byte, ev *TableMapEvent) (err error) {
 
 func getMetaDataSize(type_ uint8) uint8 {
 	switch type_ {
-	case _TYPE_TINY_BLOB:
-	case _TYPE_BLOB:
-	case _TYPE_MEDIUM_BLOB:
-	case _TYPE_LONG_BLOB:
-	case _TYPE_DOUBLE:
-	case _TYPE_FLOAT:
-	case _TYPE_GEOMETRY:
-	case _TYPE_TIME2:
-	case _TYPE_DATETIME2:
-	case _TYPE_TIMESTAMP2:
+	case _TYPE_TINY_BLOB, _TYPE_BLOB, _TYPE_MEDIUM_BLOB, _TYPE_LONG_BLOB,
+		_TYPE_DOUBLE, _TYPE_FLOAT, _TYPE_GEOMETRY, _TYPE_TIME2,
+		_TYPE_DATETIME2, _TYPE_TIMESTAMP2:
 		return 1
 
-	case _TYPE_SET:
-	case _TYPE_ENUM:
-	case _TYPE_STRING:
-	case _TYPE_BIT:
-	case _TYPE_VARCHAR:
-	case _TYPE_NEW_DECIMAL:
+	case _TYPE_SET, _TYPE_ENUM, _TYPE_STRING, _TYPE_BIT, _TYPE_VARCHAR, _TYPE_NEW_DECIMAL:
 		return 2
 
 	default:
@@ -864,8 +858,8 @@ func (b *Binlog) parseRowsEvent(buf []byte, ev *RowsEvent) (err error) {
 	ev.flags = binary.LittleEndian.Uint16(buf[off:])
 	off += 2
 
-	if ev.header.type_ == UPDATE_ROWS_EVENT {
-		length = int(binary.LittleEndian.Uint16(buf[off:]))
+	if b.desc.postHeaderLength[ev.header.type_-1] == 10 {
+		length = int(binary.LittleEndian.Uint16(buf[off:])) - 2
 		off += 2
 		ev.extraData = buf[off : off+length]
 		off += length
@@ -930,8 +924,12 @@ func (b *Binlog) parseEventRow(buf []byte, columnCount uint64,
 		} else {
 			switch b.tableMap.columns[i].type_ {
 			// string
-			case _TYPE_STRING, _TYPE_VARCHAR,
-				_TYPE_VARSTRING, _TYPE_ENUM,
+			case _TYPE_VARCHAR, _TYPE_VARSTRING:
+				v, n := parseString2(buf[off:], b.tableMap.columns[i].meta)
+				r.columns = append(r.columns, v)
+				off += n
+
+			case _TYPE_STRING, _TYPE_ENUM,
 				_TYPE_SET, _TYPE_BLOB,
 				_TYPE_TINY_BLOB, _TYPE_MEDIUM_BLOB,
 				_TYPE_LONG_BLOB, _TYPE_GEOMETRY,
@@ -1194,4 +1192,14 @@ E:
 
 func (fr *fileReader) error() error {
 	return fr.e
+}
+
+func parseString2(b []byte, length uint16) (string, int) {
+	if length < 256 {
+		length = uint16(b[0])
+		return string(b[1 : 1+length]), int(length) + 1
+	} else {
+		length = parseUint16(b)
+		return string(b[2 : 2+length]), int(length) + 2
+	}
 }
