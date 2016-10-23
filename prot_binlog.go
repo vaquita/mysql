@@ -994,6 +994,22 @@ func (b *Binlog) parseEventRow(buf []byte, columnCount uint64,
 	return r, off
 }
 
+func (b *Binlog) parseGtidLogEvent(buf []byte, ev *GtidLogEvent) {
+	var off int
+	ev.gtid.commitFlag = (buf[off] != 0)
+	off++
+	copy(ev.gtid.sourceId.data[0:], buf[off:off+16])
+	off += 16
+	ev.gtid.groupNumber = getInt64(buf[off:])
+	return
+}
+
+func (b *Binlog) parsePreviousGtidsLogEvent(buf []byte, ev *PreviousGtidsLogEvent) {
+	ev.data = make([]byte, len(buf))
+	copy(ev.data, buf[:])
+	return
+}
+
 func (b *Binlog) parseAnnotateRowsEvent(buf []byte, ev *AnnotateRowsEvent) {
 	ev.query = string(buf)
 	return

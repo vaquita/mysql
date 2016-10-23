@@ -27,6 +27,7 @@ package mysql
 import (
 	"encoding/binary"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -474,6 +475,24 @@ func (re *RawEvent) Event() Event {
 		ev := new(RowsQueryLogEvent)
 		ev.header = header
 		binlog.parseRowsQueryLogEvent(buf[off:end], ev)
+		return ev
+
+	case GTID_LOG_EVENT:
+		ev := new(GtidLogEvent)
+		ev.header = header
+		binlog.parseGtidLogEvent(buf[off:end], ev)
+		return ev
+
+	case ANONYMOUS_GTID_LOG_EVENT:
+		ev := new(GtidLogEvent)
+		ev.header = header
+		binlog.parseGtidLogEvent(buf[off:end], ev)
+		return ev
+
+	case PREVIOUS_GTIDS_LOG_EVENT:
+		ev := new(PreviousGtidsLogEvent)
+		ev.header = header
+		binlog.parsePreviousGtidsLogEvent(buf[off:end], ev)
 		return ev
 
 	case ANNOTATE_ROWS_EVENT:
@@ -1434,6 +1453,7 @@ type EventColumn struct {
 	nullable bool
 }
 
+// TABLE_MAP_EVENT
 type TableMapEvent struct {
 	header      eventHeader
 	tableId     uint64
@@ -1536,6 +1556,137 @@ type EventRow struct {
 	columns []interface{}
 }
 
+// MySQL specific events
+
+type MysqlGtid struct {
+	commitFlag  bool
+	sourceId    UUID
+	groupNumber int64 // transaction ID
+}
+
+func (gtid *MysqlGtid) SourceId() UUID {
+	return gtid.sourceId
+}
+
+func (gtid *MysqlGtid) GroupNumber() int64 {
+	return gtid.groupNumber
+}
+
+func (gtid *MysqlGtid) String() string {
+	return fmt.Sprintf("%s:%d", gtid.sourceId.String(), gtid.groupNumber)
+}
+
+type GtidLogEvent struct {
+	header eventHeader
+	gtid   MysqlGtid
+}
+
+func (e *GtidLogEvent) Time() time.Time {
+	return time.Unix(int64(e.header.timestamp), 0)
+}
+
+func (e *GtidLogEvent) Type() uint8 {
+	return e.header.type_
+}
+
+func (e *GtidLogEvent) ServerId() uint32 {
+	return e.header.serverId
+}
+
+func (e *GtidLogEvent) Size() uint32 {
+	return e.header.size
+}
+
+func (e *GtidLogEvent) Position() uint32 {
+	return e.header.position
+}
+
+func (e *GtidLogEvent) String() string {
+	return e.gtid.String()
+}
+
+func (e *GtidLogEvent) Gtid() MysqlGtid {
+	return e.gtid
+}
+
+type PreviousGtidsLogEvent struct {
+	header eventHeader
+	data   []byte
+}
+
+func (e *PreviousGtidsLogEvent) Time() time.Time {
+	return time.Unix(int64(e.header.timestamp), 0)
+}
+
+func (e *PreviousGtidsLogEvent) Type() uint8 {
+	return e.header.type_
+}
+
+func (e *PreviousGtidsLogEvent) ServerId() uint32 {
+	return e.header.serverId
+}
+
+func (e *PreviousGtidsLogEvent) Size() uint32 {
+	return e.header.size
+}
+
+func (e *PreviousGtidsLogEvent) Position() uint32 {
+	return e.header.position
+}
+
+func (e *PreviousGtidsLogEvent) String() string {
+	var (
+		res  string
+		uuid UUID
+		off  int
+	)
+
+	// read sourceId count
+	sidCount := binary.LittleEndian.Uint64(e.data[off:])
+	off += 8
+
+	for i := uint64(0); i < sidCount; i++ {
+
+		// UUID separator
+		if i > 0 {
+			res += ","
+		}
+
+		// read the sourceId
+		copy(uuid.data[0:], e.data[off:off+16])
+		res += uuid.String()
+		off += 16
+
+		// read the intervals count
+		intervalsCount := binary.LittleEndian.Uint64(e.data[off:])
+		off += 8
+		res += ":"
+
+		var intervalStart, intervalEnd uint64
+
+		for j := uint64(0); j < intervalsCount; j++ {
+			// intervals separator
+			if j > 0 {
+				res += ":"
+			}
+
+			// read one interval
+			intervalStart = binary.LittleEndian.Uint64(e.data[off:])
+			off += 8
+			intervalEnd = binary.LittleEndian.Uint64(e.data[off:])
+			off += 8
+			res += strconv.FormatUint(intervalStart, 10) + "-" +
+				strconv.FormatUint(intervalEnd, 10)
+		}
+		break
+	}
+
+	return res
+}
+
+// MariaDB specific events
+
+// ANNOTATE_ROWS_EVENT
 type AnnotateRowsEvent struct {
 	header eventHeader
 	query  string
@@ -1565,6 +1716,7 @@ func (e *AnnotateRowsEvent) Query() string {
 	return e.query
 }
 
+// BINLOG_CHECKPOINT_EVENT
 type BinlogCheckpointEvent struct {
 	header     eventHeader
 	fileLength uint32
@@ -1599,17 +1751,38 @@ func (e *BinlogCheckpointEvent) File() string {
 	return e.file
 }
 
-const (
-	FL_STANDALONE      = 1
-	FL_GROUP_COMMIT_ID = 2
-)
-
 type MariadbGtid struct {
 	domainId uint32
 	serverId uint32
 	seqno    uint64
 }
 
+func (gtid *MariadbGtid) DomainId() uint32 {
+	return gtid.domainId
+}
+
+func (gtid *MariadbGtid) ServerId() uint32 {
+	return gtid.serverId
+}
+
+func (gtid *MariadbGtid) Seqno() uint64 {
+	return gtid.seqno
+}
+
+func (gtid *MariadbGtid) String() string {
+	return fmt.Sprintf("%d-%d-%d", gtid.domainId, gtid.serverId, gtid.seqno)
+}
+
+const (
+	FL_STANDALONE = 1 << iota
+	FL_GROUP_COMMIT_ID
+	FL_TRANSACTIONAL
+	FL_ALLOW_PARALLEL
+	FL_WAITED
+	FL_DDL
+)
+
+// GTID_EVENT
 type GtidEvent struct {
 	header   eventHeader
 	gtid     MariadbGtid
@@ -1638,26 +1811,22 @@ func (e *GtidEvent) Position() uint32 {
 }
 
 func (e *GtidEvent) String() string {
-	return fmt.Sprintf("%d-%d-%d", e.gtid.domainId, e.header.serverId,
-		e.gtid.seqno)
+	return e.gtid.String()
 }
 
-func (e *GtidEvent) Seqno() uint64 {
-	return e.gtid.seqno
+func (e *GtidEvent) Gtid() MariadbGtid {
+	return e.gtid
 }
 
 func (e *GtidEvent) CommitId() uint64 {
 	return e.commitId
 }
 
-func (e *GtidEvent) DomainId() uint32 {
-	return e.gtid.domainId
-}
-
 func (e *GtidEvent) Flags() uint8 {
 	return e.flags
 }
 
+// GTID_LIST_EVENT
 type GtidListEvent struct {
 	header eventHeader
 	count  uint32
