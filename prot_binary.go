@@ -752,15 +752,15 @@ func parseFloat(b []byte) float32 {
 	return math.Float32frombits(binary.LittleEndian.Uint32(b[:4]))
 }
 
-func parseNewDecimal(b []byte, size uint16) (*big.Rat, int) {
+func parseNewDecimal(b []byte, size uint16) (float64, int) {
 	var scale, precision  int = int(size>>8), int(size&0xff)
-	decimalsize := getDecimalBinarySize(precision, scale)
+	decimalSize := getDecimalBinarySize(precision, scale)
 
 	positive := (b[0] & 0x80) == 0x80
 	b[0] ^= 0x80
 
 	if !positive {
-		for i := 0; i < decimalsize; i++ {
+		for i := 0; i < decimalSize; i++ {
 
 			b[i] ^= 0xFF
 		}
@@ -801,7 +801,8 @@ func parseNewDecimal(b []byte, size uint16) (*big.Rat, int) {
 
 
 	rat, _ := new(big.Rat).SetString(value)
-	return rat, decimalsize;
+	result ,_ := rat.Float64()
+	return result, decimalSize;
 }
 
 func getDecimalBinarySize(precision, scale int) int {
