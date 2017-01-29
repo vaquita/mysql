@@ -133,6 +133,10 @@ const (
 	_PACKET_INFILE_REQ = 0xfb
 )
 
+const _DIGITS_PER_INTEGER = 9
+var _DIGITS_TO_BYTES = []int{0, 1, 1, 2, 2, 3, 3, 4, 4, 4}
+
+
 // parseOkPacket parses the OK packet received from the server.
 func (c *Conn) parseOkPacket(b []byte) bool {
 	var off, n int

@@ -1541,7 +1541,7 @@ func (e *RowsEvent) Image() EventRows {
 }
 
 func (e *RowsEvent) AfterImage() EventRows {
-	return e.rows1
+	return e.rows2
 }
 
 type EventRows struct {

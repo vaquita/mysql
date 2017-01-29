@@ -933,12 +933,15 @@ func (b *Binlog) parseEventRow(buf []byte, columnCount uint64,
 				_TYPE_SET, _TYPE_BLOB,
 				_TYPE_TINY_BLOB, _TYPE_MEDIUM_BLOB,
 				_TYPE_LONG_BLOB, _TYPE_GEOMETRY,
-				_TYPE_BIT, _TYPE_DECIMAL,
-				_TYPE_NEW_DECIMAL:
+				_TYPE_BIT, _TYPE_DECIMAL:
 				v, n := parseString(buf[off:])
 				r.columns = append(r.columns, v)
 				off += n
-
+			case _TYPE_NEW_DECIMAL:
+				v, n := parseNewDecimal(buf[off:], b.tableMap.columns[i].meta)
+				vf, _ := v.Float64()
+				r.columns = append(r.columns, vf)
+				off += n
 			// int64
 			case _TYPE_LONG_LONG:
 				r.columns = append(r.columns, parseInt64(buf[off:off+8]))

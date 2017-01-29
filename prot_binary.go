@@ -28,7 +28,9 @@ import (
 	"database/sql/driver"
 	"encoding/binary"
 	"math"
+	"math/big"
 	"time"
+	"strconv"
 )
 
 // createComStmtPrepare generates the COM_STMT_PREPARE packet.
@@ -749,6 +751,80 @@ func parseDouble(b []byte) float64 {
 func parseFloat(b []byte) float32 {
 	return math.Float32frombits(binary.LittleEndian.Uint32(b[:4]))
 }
+
+func parseNewDecimal(b []byte, size uint16) (*big.Rat, int) {
+	var scale, precision  int = int(size>>8), int(size&0xff)
+	decimalsize := getDecimalBinarySize(precision, scale)
+
+	positive := (b[0] & 0x80) == 0x80
+	b[0] ^= 0x80
+
+	if !positive {
+		for i := 0; i < decimalsize; i++ {
+
+			b[i] ^= 0xFF
+		}
+	}
+	x := precision - scale
+	ipDigits := x / _DIGITS_PER_INTEGER
+	ipDigitsX := x - ipDigits * _DIGITS_PER_INTEGER
+	ipSize := (ipDigits << 2) + _DIGITS_TO_BYTES[ipDigitsX]
+	offset := _DIGITS_TO_BYTES[ipDigitsX]
+
+	var value string
+
+	if !positive {
+		value += "-"
+	}
+
+	if offset > 0 {
+		test := bigEndianInteger(b, 0, offset)
+		value += strconv.FormatUint(uint64(test), 10)
+
+	}
+
+
+	for ; offset < ipSize; offset += 4 {
+		value += strconv.FormatUint(uint64(bigEndianInteger(b, 0, offset)), 10)
+	}
+	shift := 0
+	value += "."
+
+	for ; shift + _DIGITS_PER_INTEGER <= scale; shift += _DIGITS_PER_INTEGER {
+		value += strconv.FormatUint(uint64(bigEndianInteger(b, offset, 4)), 10)
+		offset += 4
+	}
+
+	if (shift < scale) {
+		value += strconv.FormatUint(uint64(bigEndianInteger(b, offset, _DIGITS_TO_BYTES[scale - shift])), 10)
+	}
+
+
+	rat, _ := new(big.Rat).SetString(value)
+	return rat, decimalsize;
+}
+
+func getDecimalBinarySize(precision, scale int) int {
+	x := precision - scale
+	ipd := x / _DIGITS_PER_INTEGER
+	fpd := scale / _DIGITS_PER_INTEGER
+	return (ipd << 2) + _DIGITS_TO_BYTES[x - ipd * _DIGITS_PER_INTEGER] +
+		(fpd << 2) + _DIGITS_TO_BYTES[scale - fpd * _DIGITS_PER_INTEGER]
+}
+
+func bigEndianInteger(bytes []byte, offset int, length int) int {
+	result := 0;
+	for i := offset; i < (offset + length); i++ {
+		b := bytes[i];
+		if b >= 0 {
+			result = (result << 8) | int(b)
+		} else {
+			result = (result << 8) | int(b >> 256)
+		}
+	}
+	return result;
+}
+
 
 // TODO: fix location
 func parseDate(b []byte) (time.Time, int) {
