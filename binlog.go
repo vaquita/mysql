@@ -162,8 +162,16 @@ func (b *Binlog) SetPosition(position uint32) {
 	b.index.position = position
 }
 
+func (b *Binlog) GetPosition() uint32{
+	return b.index.position
+}
+
 func (b *Binlog) SetFile(file string) {
 	b.index.file = file
+}
+
+func (b *Binlog) GetFile() string{
+	return b.index.file
 }
 
 func (b *Binlog) Begin() error {
@@ -1545,7 +1553,7 @@ func (e *RowsEvent) AfterImage() EventRows {
 }
 
 type EventRows struct {
-	rows []EventRow
+	Rows   []EventRow
 
 	// iterator
 	pos    uint64
@@ -1553,7 +1561,7 @@ type EventRows struct {
 }
 
 type EventRow struct {
-	columns []interface{}
+	Columns []interface{}
 }
 
 // MySQL specific events

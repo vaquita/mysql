@@ -40,8 +40,8 @@ type Stmt struct {
 	paramCount  uint16
 	warnings    uint16
 	// TODO: where to use the following received column definitions?
-	paramDefs  []*columnDefinition
-	columnDefs []*columnDefinition
+	paramDefs  []*ColumnDefinition
+	columnDefs []*ColumnDefinition
 
 	// COM_STMT_EXECUTE
 	flags              uint8

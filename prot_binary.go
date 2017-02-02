@@ -266,8 +266,8 @@ func (c *Conn) handleComStmtPrepareResponse() (*Stmt, error) {
 	s = new(Stmt)
 	s.c = c
 
-	s.paramDefs = make([]*columnDefinition, 0)
-	s.columnDefs = make([]*columnDefinition, 0)
+	s.paramDefs = make([]*ColumnDefinition, 0)
+	s.columnDefs = make([]*ColumnDefinition, 0)
 
 	// read COM_STMT_PREPARE_OK packet.
 	if b, err = c.readPacket(); err != nil {
@@ -533,7 +533,7 @@ func (c *Conn) handleBinaryResultSet(columnCount uint16) (*Rows, error) {
 	)
 
 	rs := new(Rows)
-	rs.columnDefs = make([]*columnDefinition, 0)
+	rs.columnDefs = make([]*ColumnDefinition, 0)
 	rs.rows = make([]*row, 0)
 	rs.columnCount = columnCount
 
@@ -602,7 +602,7 @@ func (c *Conn) handleBinaryResultSetRow(b []byte, rs *Rows) *row {
 		if isNull(nullBitmap, i, 2) == true {
 			r.columns = append(r.columns, nil)
 		} else {
-			switch rs.columnDefs[i].columnType {
+			switch rs.columnDefs[i].ColumnType {
 			// string
 			case _TYPE_STRING, _TYPE_VARCHAR,
 				_TYPE_VARSTRING, _TYPE_ENUM,
