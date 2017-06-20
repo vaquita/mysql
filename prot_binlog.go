@@ -877,10 +877,10 @@ func (b *Binlog) parseRowsEvent(buf []byte, ev *RowsEvent) (err error) {
 		off += length
 	}
 
-	ev.rows1.rows = make([]EventRow, 0)
+	ev.rows1.Rows = make([]EventRow, 0)
 	if (ev.header.type_ == UPDATE_ROWS_EVENT_V1) ||
 		(ev.header.type_ == UPDATE_ROWS_EVENT) {
-		ev.rows2.rows = make([]EventRow, 0)
+		ev.rows2.Rows = make([]EventRow, 0)
 	}
 
 	var (
@@ -891,13 +891,13 @@ func (b *Binlog) parseRowsEvent(buf []byte, ev *RowsEvent) (err error) {
 	for off < len(buf) {
 		r, n = b.parseEventRow(buf[off:], ev.columnCount,
 			ev.columnsPresentBitmap1)
-		ev.rows1.rows = append(ev.rows1.rows, r)
+		ev.rows1.Rows = append(ev.rows1.Rows, r)
 		off += n
 		if (ev.header.type_ == UPDATE_ROWS_EVENT_V1) ||
 			(ev.header.type_ == UPDATE_ROWS_EVENT) {
 			r, n = b.parseEventRow(buf[off:], ev.columnCount,
 				ev.columnsPresentBitmap2)
-			ev.rows2.rows = append(ev.rows2.rows, r)
+			ev.rows2.Rows = append(ev.rows2.Rows, r)
 			off += n
 		}
 	}
@@ -912,7 +912,7 @@ func (b *Binlog) parseEventRow(buf []byte, columnCount uint64,
 		r   EventRow
 	)
 
-	r.columns = make([]interface{}, 0, columnCount)
+	r.Columns = make([]interface{}, 0, columnCount)
 
 	nullBitmapSize := int((setBitCount(columnsPresentBitmap) + 7) / 8)
 	nullBitmap := buf[off : off+nullBitmapSize]
@@ -920,66 +920,68 @@ func (b *Binlog) parseEventRow(buf []byte, columnCount uint64,
 
 	for i := uint64(0); i < columnCount; i++ {
 		if isNull(nullBitmap, uint16(i), 0) == true {
-			r.columns = append(r.columns, nil)
+			r.Columns = append(r.Columns, nil)
 		} else {
 			switch b.tableMap.columns[i].type_ {
 			// string
 			case _TYPE_VARCHAR, _TYPE_VARSTRING:
 				v, n := parseString2(buf[off:], b.tableMap.columns[i].meta)
-				r.columns = append(r.columns, v)
+				r.Columns = append(r.Columns, v)
 				off += n
 
 			case _TYPE_STRING, _TYPE_ENUM,
 				_TYPE_SET, _TYPE_BLOB,
 				_TYPE_TINY_BLOB, _TYPE_MEDIUM_BLOB,
 				_TYPE_LONG_BLOB, _TYPE_GEOMETRY,
-				_TYPE_BIT, _TYPE_DECIMAL,
-				_TYPE_NEW_DECIMAL:
+				_TYPE_BIT, _TYPE_DECIMAL:
 				v, n := parseString(buf[off:])
-				r.columns = append(r.columns, v)
+				r.Columns = append(r.Columns, v)
 				off += n
-
+			case _TYPE_NEW_DECIMAL:
+				v, n := parseNewDecimal(buf[off:], b.tableMap.columns[i].meta)
+				r.Columns = append(r.Columns, v)
+				off += n
 			// int64
 			case _TYPE_LONG_LONG:
-				r.columns = append(r.columns, parseInt64(buf[off:off+8]))
+				r.Columns = append(r.Columns, parseInt64(buf[off:off+8]))
 				off += 8
 
 			// int32
 			case _TYPE_LONG, _TYPE_INT24:
-				r.columns = append(r.columns, parseInt32(buf[off:off+4]))
+				r.Columns = append(r.Columns, parseInt32(buf[off:off+4]))
 				off += 4
 
 			// int16
 			case _TYPE_SHORT, _TYPE_YEAR:
-				r.columns = append(r.columns, parseInt16(buf[off:off+2]))
+				r.Columns = append(r.Columns, parseInt16(buf[off:off+2]))
 				off += 2
 
 			// int8
 			case _TYPE_TINY:
-				r.columns = append(r.columns, parseInt8(buf[off:off+1]))
+				r.Columns = append(r.Columns, parseInt8(buf[off:off+1]))
 				off++
 
 			// float64
 			case _TYPE_DOUBLE:
-				r.columns = append(r.columns, parseDouble(buf[off:off+8]))
+				r.Columns = append(r.Columns, parseDouble(buf[off:off+8]))
 				off += 8
 
 			// float32
 			case _TYPE_FLOAT:
-				r.columns = append(r.columns, parseFloat(buf[off:off+4]))
+				r.Columns = append(r.Columns, parseFloat(buf[off:off+4]))
 				off += 4
 
 			// time.Time
 			case _TYPE_DATE, _TYPE_DATETIME,
 				_TYPE_TIMESTAMP:
 				v, n := parseDate(buf[off:])
-				r.columns = append(r.columns, v)
+				r.Columns = append(r.Columns, v)
 				off += n
 
 			// time.Duration
 			case _TYPE_TIME:
 				v, n := parseTime(buf[off:])
-				r.columns = append(r.columns, v)
+				r.Columns = append(r.Columns, v)
 				off += n
 
 			// TODO: map the following unhandled types accordingly

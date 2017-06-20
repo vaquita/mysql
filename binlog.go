@@ -137,6 +137,9 @@ func (b *Binlog) Connect(dsn string) error {
 			return err
 		} else {
 			b.reader = nr
+			if b.checksum, err = fetchBinlogChecksum(nr.conn); err != nil {
+				return err
+			}
 		}
 
 	case "file":
@@ -145,6 +148,7 @@ func (b *Binlog) Connect(dsn string) error {
 			return err
 		} else {
 			b.reader = fr
+			b.checksum = new(checksumOff)
 		}
 
 	default:
@@ -152,7 +156,6 @@ func (b *Binlog) Connect(dsn string) error {
 
 	}
 
-	b.checksum = new(checksumOff)
 	b.p = p
 
 	return nil
@@ -162,8 +165,16 @@ func (b *Binlog) SetPosition(position uint32) {
 	b.index.position = position
 }
 
+func (b *Binlog) GetPosition() uint32{
+	return b.index.position
+}
+
 func (b *Binlog) SetFile(file string) {
 	b.index.file = file
+}
+
+func (b *Binlog) GetFile() string{
+	return b.index.file
 }
 
 func (b *Binlog) Begin() error {
@@ -190,11 +201,12 @@ func (b *Binlog) RawEvent() (re RawEvent, err error) {
 	re.header, off = parseEventHeader(re.body)
 
 	end = len(re.body)
+	end -= _BINLOG_CHECKSUM_LENGTH
 
-	if b.checksum.algorithm() != BINLOG_CHECKSUM_ALG_OFF {
-		// exclude the event checksum
-		end -= _BINLOG_CHECKSUM_LENGTH
-	}
+	//if b.checksum.algorithm() != BINLOG_CHECKSUM_ALG_OFF {
+	//	// exclude the event checksum
+	//	end -= _BINLOG_CHECKSUM_LENGTH
+	//}
 
 	switch re.header.type_ {
 	case START_EVENT_V3:
@@ -209,7 +221,7 @@ func (b *Binlog) RawEvent() (re RawEvent, err error) {
 	case FORMAT_DESCRIPTION_EVENT:
 		ev := new(FormatDescriptionEvent)
 
-		end -= _BINLOG_CHECKSUM_LENGTH
+		//end -= _BINLOG_CHECKSUM_LENGTH
 		b.parseFormatDescriptionEvent(re.body[off:end], ev)
 
 		// now that we have parsed FORMAT_DESCRIPTION_EVENT, we can
@@ -1541,11 +1553,11 @@ func (e *RowsEvent) Image() EventRows {
 }
 
 func (e *RowsEvent) AfterImage() EventRows {
-	return e.rows1
+	return e.rows2
 }
 
 type EventRows struct {
-	rows []EventRow
+	Rows   []EventRow
 
 	// iterator
 	pos    uint64
@@ -1553,7 +1565,7 @@ type EventRows struct {
 }
 
 type EventRow struct {
-	columns []interface{}
+	Columns []interface{}
 }
 
 // MySQL specific events

@@ -133,6 +133,10 @@ const (
 	_PACKET_INFILE_REQ = 0xfb
 )
 
+const _DIGITS_PER_INTEGER = 9
+var _DIGITS_TO_BYTES = []int{0, 1, 1, 2, 2, 3, 3, 4, 4, 4}
+
+
 // parseOkPacket parses the OK packet received from the server.
 func (c *Conn) parseOkPacket(b []byte) bool {
 	var off, n int
@@ -449,41 +453,41 @@ func (c *Conn) createComProcessInfo() ([]byte, error) {
 }
 
 // parseColumnDefinitionPacket parses the column (field) definition packet.
-func parseColumnDefinitionPacket(b []byte, isComFieldList bool) *columnDefinition {
+func parseColumnDefinitionPacket(b []byte, isComFieldList bool) *ColumnDefinition {
 	var off, n int
 
 	// alloc a new columnDefinition object
-	col := new(columnDefinition)
+	col := new(ColumnDefinition)
 
-	col.catalog, n = getLenencString(b[off:])
+	col.Catalog, n = getLenencString(b[off:])
 	off += n
-	col.schema, n = getLenencString(b[off:])
+	col.Schema, n = getLenencString(b[off:])
 	off += n
-	col.table, n = getLenencString(b[off:])
+	col.Table, n = getLenencString(b[off:])
 	off += n
-	col.orgTable, n = getLenencString(b[off:])
+	col.OrgTable, n = getLenencString(b[off:])
 	off += n
-	col.name, n = getLenencString(b[off:])
+	col.Name, n = getLenencString(b[off:])
 	off += n
-	col.orgName, n = getLenencString(b[off:])
+	col.OrgName, n = getLenencString(b[off:])
 	off += n
-	col.fixedLenFieldLength, n = getLenencInt(b[off:])
+	col.FixedLenFieldLength, n = getLenencInt(b[off:])
 	off += n
-	col.charset = binary.LittleEndian.Uint16(b[off : off+2])
+	col.Charset = binary.LittleEndian.Uint16(b[off : off+2])
 	off += 2
-	col.columnLength = binary.LittleEndian.Uint32(b[off : off+4])
+	col.ColumnLength = binary.LittleEndian.Uint32(b[off : off+4])
 	off += 4
-	col.columnType = uint8(b[off])
+	col.ColumnType = uint8(b[off])
 	off++
-	col.flags = binary.LittleEndian.Uint16(b[off : off+2])
+	col.Flags = binary.LittleEndian.Uint16(b[off : off+2])
 	off += 2
-	col.decimals = uint8(b[off])
+	col.Decimals = uint8(b[off])
 	off++
 
 	off += 2 //filler [00] [00]
 
 	if isComFieldList == true {
-		col.defaultValues, _ = getLenencString(b)
+		col.DefaultValues, _ = getLenencString(b)
 	}
 
 	return col
@@ -632,7 +636,7 @@ func (c *Conn) handleResultSet(columnCount uint16) (*Rows, error) {
 	)
 
 	rs := new(Rows)
-	rs.columnDefs = make([]*columnDefinition, 0)
+	rs.columnDefs = make([]*ColumnDefinition, 0)
 	rs.rows = make([]*row, 0)
 	rs.columnCount = columnCount
 

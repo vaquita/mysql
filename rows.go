@@ -31,7 +31,7 @@ import (
 
 type Rows struct {
 	columnCount uint16
-	columnDefs  []*columnDefinition
+	columnDefs  []*ColumnDefinition
 	rows        []*row
 
 	// iterator-related
@@ -39,20 +39,20 @@ type Rows struct {
 	closed bool
 }
 
-type columnDefinition struct {
-	catalog             nullString
-	schema              nullString
-	table               nullString
-	orgTable            nullString
-	name                nullString
-	orgName             nullString
-	fixedLenFieldLength uint64
-	charset             uint16
-	columnLength        uint32
-	columnType          uint8
-	flags               uint16
-	decimals            uint8
-	defaultValues       nullString
+type ColumnDefinition struct {
+	Catalog             nullString
+	Schema              nullString
+	Table               nullString
+	OrgTable            nullString
+	Name                nullString
+	OrgName             nullString
+	FixedLenFieldLength uint64
+	Charset             uint16
+	ColumnLength        uint32
+	ColumnType          uint8
+	Flags               uint16
+	Decimals            uint8
+	DefaultValues       nullString
 }
 
 type row struct {
@@ -62,7 +62,7 @@ type row struct {
 func (r *Rows) Columns() []string {
 	columns := make([]string, 0, r.columnCount)
 	for i := 0; i < int(r.columnCount); i++ {
-		columns = append(columns, r.columnDefs[i].name.value)
+		columns = append(columns, r.columnDefs[i].Name.value)
 	}
 	return columns
 }

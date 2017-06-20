@@ -27,6 +27,7 @@ package mysql
 import (
 	"encoding/binary"
 	"hash/crc32"
+	"database/sql/driver"
 )
 
 const _BINLOG_CHECKSUM_LENGTH = 4
@@ -108,8 +109,33 @@ func (c *checksumCRC32IEEE) test(ev []byte) bool {
 
 // notifyChecksumAwareness notifies master of its checksum capabilities.
 func notifyChecksumAwareness(c *Conn) error {
-	_, err := c.handleExec("SET @master_binlog_checksum='NONE'", nil)
+	_, err := c.handleExec("SET @master_binlog_checksum= @@global.binlog_checksum", nil)
 	return err
+}
+
+// fetchBinlogChecksum get checksum algorithm.
+func fetchBinlogChecksum(c *Conn) (checksumVerifier, error) {
+	var checksum checksumVerifier
+	checksum = new(checksumOff)
+	rows, err := c.Query("show global variables like 'binlog_checksum'", nil)
+	if err != nil {
+		return checksum, err
+	}
+	defer rows.Close()
+	var dest = make([]driver.Value, len(rows.Columns()))
+	err = rows.Next(dest)
+	if err != nil {
+		return checksum, err
+	}
+	switch dest[1].(string) {
+	case "CRC32":
+		checksum = new(checksumCRC32IEEE)
+	default :
+
+	}
+
+	return checksum, err
+
 }
 
 // updateChecksumVerifier updates the current checksum verifier
