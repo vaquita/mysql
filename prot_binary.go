@@ -29,8 +29,8 @@ import (
 	"encoding/binary"
 	"math"
 	"math/big"
-	"time"
 	"strconv"
+	"time"
 )
 
 // createComStmtPrepare generates the COM_STMT_PREPARE packet.
@@ -753,7 +753,7 @@ func parseFloat(b []byte) float32 {
 }
 
 func parseNewDecimal(b []byte, size uint16) (float64, int) {
-	var scale, precision  int = int(size>>8), int(size&0xff)
+	var scale, precision int = int(size >> 8), int(size & 0xff)
 	decimalSize := getDecimalBinarySize(precision, scale)
 
 	positive := (b[0] & 0x80) == 0x80
@@ -767,7 +767,7 @@ func parseNewDecimal(b []byte, size uint16) (float64, int) {
 	}
 	x := precision - scale
 	ipDigits := x / _DIGITS_PER_INTEGER
-	ipDigitsX := x - ipDigits * _DIGITS_PER_INTEGER
+	ipDigitsX := x - ipDigits*_DIGITS_PER_INTEGER
 	ipSize := (ipDigits << 2) + _DIGITS_TO_BYTES[ipDigitsX]
 	offset := _DIGITS_TO_BYTES[ipDigitsX]
 
@@ -783,49 +783,46 @@ func parseNewDecimal(b []byte, size uint16) (float64, int) {
 
 	}
 
-
 	for ; offset < ipSize; offset += 4 {
 		value += strconv.FormatUint(uint64(bigEndianInteger(b, 0, offset)), 10)
 	}
 	shift := 0
 	value += "."
 
-	for ; shift + _DIGITS_PER_INTEGER <= scale; shift += _DIGITS_PER_INTEGER {
+	for ; shift+_DIGITS_PER_INTEGER <= scale; shift += _DIGITS_PER_INTEGER {
 		value += strconv.FormatUint(uint64(bigEndianInteger(b, offset, 4)), 10)
 		offset += 4
 	}
 
-	if (shift < scale) {
-		value += strconv.FormatUint(uint64(bigEndianInteger(b, offset, _DIGITS_TO_BYTES[scale - shift])), 10)
+	if shift < scale {
+		value += strconv.FormatUint(uint64(bigEndianInteger(b, offset, _DIGITS_TO_BYTES[scale-shift])), 10)
 	}
 
-
 	rat, _ := new(big.Rat).SetString(value)
-	result ,_ := rat.Float64()
-	return result, decimalSize;
+	result, _ := rat.Float64()
+	return result, decimalSize
 }
 
 func getDecimalBinarySize(precision, scale int) int {
 	x := precision - scale
 	ipd := x / _DIGITS_PER_INTEGER
 	fpd := scale / _DIGITS_PER_INTEGER
-	return (ipd << 2) + _DIGITS_TO_BYTES[x - ipd * _DIGITS_PER_INTEGER] +
-		(fpd << 2) + _DIGITS_TO_BYTES[scale - fpd * _DIGITS_PER_INTEGER]
+	return (ipd << 2) + _DIGITS_TO_BYTES[x-ipd*_DIGITS_PER_INTEGER] +
+		(fpd << 2) + _DIGITS_TO_BYTES[scale-fpd*_DIGITS_PER_INTEGER]
 }
 
 func bigEndianInteger(bytes []byte, offset int, length int) int {
-	result := 0;
+	result := 0
 	for i := offset; i < (offset + length); i++ {
-		b := bytes[i];
+		b := bytes[i]
 		if b >= 0 {
 			result = (result << 8) | int(b)
 		} else {
-			result = (result << 8) | int(b >> 256)
+			result = (result << 8) | int(b>>256)
 		}
 	}
-	return result;
+	return result
 }
-
 
 // TODO: fix location
 func parseDate(b []byte) (time.Time, int) {

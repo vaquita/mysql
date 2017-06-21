@@ -165,7 +165,7 @@ func (b *Binlog) SetPosition(position uint32) {
 	b.index.position = position
 }
 
-func (b *Binlog) GetPosition() uint32{
+func (b *Binlog) GetPosition() uint32 {
 	return b.index.position
 }
 
@@ -173,7 +173,7 @@ func (b *Binlog) SetFile(file string) {
 	b.index.file = file
 }
 
-func (b *Binlog) GetFile() string{
+func (b *Binlog) GetFile() string {
 	return b.index.file
 }
 
@@ -1557,7 +1557,7 @@ func (e *RowsEvent) AfterImage() EventRows {
 }
 
 type EventRows struct {
-	Rows   []EventRow
+	Rows []EventRow
 
 	// iterator
 	pos    uint64

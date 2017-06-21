@@ -25,9 +25,9 @@
 package mysql
 
 import (
+	"database/sql/driver"
 	"encoding/binary"
 	"hash/crc32"
-	"database/sql/driver"
 )
 
 const _BINLOG_CHECKSUM_LENGTH = 4
@@ -130,7 +130,7 @@ func fetchBinlogChecksum(c *Conn) (checksumVerifier, error) {
 	switch dest[1].(string) {
 	case "CRC32":
 		checksum = new(checksumCRC32IEEE)
-	default :
+	default:
 
 	}
 
